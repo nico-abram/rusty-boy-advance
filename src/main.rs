@@ -1,4 +1,5 @@
 #![feature(box_syntax)]
+#![feature(test)]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
