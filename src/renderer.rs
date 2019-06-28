@@ -18,9 +18,7 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
     let renderer = unsafe {
         window.create_renderer(
             None,
-            RendererFlags::default()
-                .with_accelerated(true)
-                .with_present_vsync(true),
+            RendererFlags::default().with_accelerated(true).with_present_vsync(true),
         )?
     };
     let beginning_of_time = std::time::Instant::now();
@@ -32,11 +30,7 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
                     window_id: _,
                     is_key_down,
                     repeat_count: _,
-                    key_info:
-                        KeyInfo {
-                            keycode: Some(code),
-                            ..
-                        },
+                    key_info: KeyInfo { keycode: Some(code), .. },
                 } => {
                     if is_key_down {
                         match code {
@@ -74,19 +68,13 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
         unsafe {
             #[allow(clippy::cast_ptr_alignment)]
             surface.lock_edit(|ptr| {
-                assert_eq!(
-                    (ptr as usize) & 3,
-                    0,
-                    "Got an unaligned pointer from the surface"
-                );
+                assert_eq!((ptr as usize) & 3, 0, "Got an unaligned pointer from the surface");
                 for x in 0usize..240usize {
                     for y in 0usize..160usize {
                         // Note: pitch values are provided **in bytes**, so cast to the pixel
                         // type after you offset to the start of the target row.
                         let row_ptr = ptr.offset((y * pitch) as isize) as *mut u32;
-                        row_ptr
-                            .offset(x as isize)
-                            .write(cpu.output_texture[x * 160 + y]);
+                        row_ptr.offset(x as isize).write(cpu.output_texture[x * 160 + y]);
                     }
                 }
             })?;
