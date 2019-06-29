@@ -1,3 +1,4 @@
+#![feature(test)]
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
@@ -289,6 +290,34 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
         _ => unimplemented!(),
     }
 }
+fn decode_thumb_raw(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+    let bits15_8 = (opcode >> 8) as u8;
+    const T: bool = true;
+    const F: bool = false;
+    match bits15_8 {
+        x if (x & 0b11111100) == 0b00011100 => add_or_sub,
+        x if (x & 0b11100000) == 0b00000000 => move_shifted_register,
+        x if (x & 0b11100000) == 0b00100000 => immediate_operation,
+        x if (x & 0b11111100) == 0b01000000 => alu_operation,
+        x if (x & 0b11111100) == 0b01000100 => high_register_operations_or_bx,
+        x if (x & 0b11111000) == 0b01001000 => pc_relative_load,
+        x if (x & 0b11110010) == 0b01010000 => load_or_store_with_relative_offset,
+        x if (x & 0b11110010) == 0b01010010 => load_or_store_sign_extended_byte_or_halfword,
+        x if (x & 0b11100000) == 0b01100000 => load_or_store_with_immediate_offset,
+        x if (x & 0b11110000) == 0b10000000 => load_or_store_halfword,
+        x if (x & 0b11110000) == 0b10010000 => stack_pointer_relative_load_or_store,
+        x if (x & 0b11110000) == 0b10100000 => load_address,
+        x if (x & 0b11111111) == 0b10110000 => add_offset_to_stack_pointer,
+        x if (x & 0b10110110) == 0b10110100 => push_or_pop,
+        x if (x & 0b11110000) == 0b11000000 => multiple_loads_or_stores,
+        x if (x & 0b11111111) == 0b1101111 => software_interrupt,
+        x if (x & 0b11110000) == 0b11010000 => conditional_branch,
+        x if (x & 0b11111000) == 0b11100000 => branch,
+        x if (x & 0b11110000) == 0b11110000 => branch_and_link_or_link_and_exchange,
+        //TODO: the rest
+        _ => unimplemented!(),
+    }
+}
 
 pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
     let pc = *cpu.pc();
@@ -302,4 +331,87 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
     */
     let instruction = decode_thumb(opcode);
     instruction(cpu, opcode);
+}
+
+extern crate test;
+#[cfg(test)]
+mod tests {
+    use super::AsBoolSlice;
+    use super::*;
+    use test::Bencher;
+    fn none(cpu: &mut Cpu, x: u16) {}
+    fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+        let bits15_8 = (opcode >> 8) as u8;
+        const T: bool = true;
+        const F: bool = false;
+        match bits15_8.as_bools() {
+            [F, F, F, T, T, T, _, _] => add_or_sub,
+            [F, F, F, _, _, _, _, _] => move_shifted_register,
+            [F, F, T, _, _, _, _, _] => immediate_operation,
+            [F, T, F, F, F, F, _, _] => alu_operation,
+            [F, T, F, F, F, T, _, _] => high_register_operations_or_bx,
+            [F, T, F, F, T, _, _, _] => pc_relative_load,
+            [F, T, F, T, _, _, F, _] => load_or_store_with_relative_offset,
+            [F, T, F, T, _, _, T, _] => load_or_store_sign_extended_byte_or_halfword,
+            [F, T, T, _, _, _, _, _] => load_or_store_with_immediate_offset,
+            [T, F, F, F, _, _, _, _] => load_or_store_halfword,
+            [T, F, F, T, _, _, _, _] => stack_pointer_relative_load_or_store,
+            [T, F, T, F, _, _, _, _] => load_address,
+            [T, F, T, T, F, F, F, F] => add_offset_to_stack_pointer,
+            [T, F, T, T, _, T, F, _] => push_or_pop,
+            [T, T, F, F, _, _, _, _] => multiple_loads_or_stores,
+            [T, T, F, T, T, T, T, T] => software_interrupt,
+            [T, T, F, T, _, _, _, _] => conditional_branch,
+            [T, T, T, F, F, _, _, _] => branch,
+            [T, T, T, T, _, _, _, _] => branch_and_link_or_link_and_exchange,
+            _ => none,
+        }
+    }
+    fn decode_thumb_raw(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+        let bits15_8 = (opcode >> 8) as u8;
+        const T: bool = true;
+        const F: bool = false;
+        match bits15_8 {
+            x if (x & 0b11111100) == 0b00011100 => add_or_sub,
+            x if (x & 0b11100000) == 0b00000000 => move_shifted_register,
+            x if (x & 0b11100000) == 0b00100000 => immediate_operation,
+            x if (x & 0b11111100) == 0b01000000 => alu_operation,
+            x if (x & 0b11111100) == 0b01000100 => high_register_operations_or_bx,
+            x if (x & 0b11111000) == 0b01001000 => pc_relative_load,
+            x if (x & 0b11110010) == 0b01010000 => load_or_store_with_relative_offset,
+            x if (x & 0b11110010) == 0b01010010 => load_or_store_sign_extended_byte_or_halfword,
+            x if (x & 0b11100000) == 0b01100000 => load_or_store_with_immediate_offset,
+            x if (x & 0b11110000) == 0b10000000 => load_or_store_halfword,
+            x if (x & 0b11110000) == 0b10010000 => stack_pointer_relative_load_or_store,
+            x if (x & 0b11110000) == 0b10100000 => load_address,
+            x if (x & 0b11111111) == 0b10110000 => add_offset_to_stack_pointer,
+            x if (x & 0b10110110) == 0b10110100 => push_or_pop,
+            x if (x & 0b11110000) == 0b11000000 => multiple_loads_or_stores,
+            x if (x & 0b11111111) == 0b1101111 => software_interrupt,
+            x if (x & 0b11110000) == 0b11010000 => conditional_branch,
+            x if (x & 0b11111000) == 0b11100000 => branch,
+            x if (x & 0b11110000) == 0b11110000 => branch_and_link_or_link_and_exchange,
+            _ => none,
+        }
+    }
+    #[bench]
+    fn bench_decode_thumb(b: &mut Bencher) {
+        test::black_box(b.iter(|| {
+            test::black_box((0..100000u32).fold(0u32, |old, x| {
+                test::black_box(old);
+                test::black_box(decode_thumb(x as u16));
+                0u32
+            }))
+        }));
+    }
+    #[bench]
+    fn bench_decode_thumb_raw(b: &mut Bencher) {
+        test::black_box(b.iter(|| {
+            test::black_box((0..100000u32).fold(0u32, |old, x| {
+                test::black_box(old);
+                test::black_box(decode_thumb_raw(x as u16));
+                0u32
+            }))
+        }));
+    }
 }
