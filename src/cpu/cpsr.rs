@@ -10,7 +10,7 @@ fn is_set(x: u32, bit: u32) -> bool {
 impl CPSR {
     pub(crate) fn to_string(&self) -> String {
         format!(
-            "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{} mode:{:x?}",
+            "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{} mode:{:x?}({:x?})",
             self.N(),
             self.C(),
             self.Z(),
@@ -19,7 +19,8 @@ impl CPSR {
             self.I(),
             self.F(),
             self.T(),
-            self.mode()
+            self.mode(),
+            self.mode().as_byte()
         )
     }
     fn is_set(&self, bit: u32) -> bool {
@@ -99,5 +100,25 @@ impl CPSR {
     /// Set priviledge mode
     pub(crate) fn set_mode(&mut self, new_mode: CpuMode) {
         self.0 = (self.0 & 0xFFFF_FFE0) | (new_mode.as_byte() as u32);
+    }
+    
+    pub(crate) fn addition_carries(res:u32, op1:u32, op2:u32) -> bool {
+        ((op1 & 0x8000_0000) != 0 && (op2 & 0x8000_0000) != 0)
+            || ((res & 0x8000_0000) != 0 && !(op1 & 0x8000_0000) != 0)
+            || ((res & 0x8000_0000) != 0 && !(op2 & 0x8000_0000) != 0)
+    }
+    pub(crate) fn set_all_status_flags_for_addition(&mut self, res: u32, op1:u32, op2:u32, overflow: Option<bool>) {
+        let carry = Some(CPSR::addition_carries(res, op1, op2));
+        self.set_all_status_flags(res, carry, overflow);
+    } 
+    pub(crate) fn set_all_status_flags(&mut self, res: u32, carry: Option<bool>, overflow: Option<bool>) {
+        if let Some(carry) = carry {
+            self.set_C(carry);
+        } 
+        if let Some(overflow) = overflow {
+            self.set_V(overflow);
+        }
+        self.set_N((res & 0x8000_0000) != 0);
+        self.set_Z(res == 0x0000_0000);
     }
 }

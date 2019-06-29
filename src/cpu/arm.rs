@@ -266,7 +266,7 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
     if is_load {
         cpu.regs[rd] = if is_byte_size {
             // Least significant byte
-            (*cpu.fetch_byte(((addr) / 4u32) * 4u32)) as u32
+            cpu.fetch_byte(((addr) / 4u32) * 4u32) as u32
         } else {
             cpu.fetch_u32(addr)
         };
@@ -370,24 +370,9 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
     let res = &mut cpu.regs[rd];
     let cpsr = cpu.cpsr;
     let ref_cpsr = &mut cpu.cpsr;
-    // TODO: Flag setting
-    let addition_carries = |res: u32, op1: u32, op2: u32| {
-        ((op1 & 0x8000_0000) != 0 && (op2 & 0x8000_0000) != 0)
-            || ((res & 0x8000_0000) != 0 && !(op1 & 0x8000_0000) != 0)
-            || ((res & 0x8000_0000) != 0 && !(op2 & 0x8000_0000) != 0)
-    };
     let mut set_all_flags = move |res: u32, carry: Option<bool>, overflow: Option<bool>| {
         if set_condition_flags {
-            if let Some(carry) = carry {
-                ref_cpsr.set_C(carry);
-            }
-            if let Some(overflow) = overflow {
-                ref_cpsr.set_V(overflow);
-            }
-            ref_cpsr.set_N((res & 0x8000_0000) != 0);
-            dbg!("setting Z to");
-            dbg!(res);
-            ref_cpsr.set_Z(res == 0x0000_0000);
+            ref_cpsr.set_all_status_flags(res, carry, overflow);
         }
     };
     match operation as u8 {
@@ -417,16 +402,17 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
             //add
             let (result, overflow) = op2.overflowing_add(rn);
             *res = result;
-            set_all_flags(*res, Some(addition_carries(result, rn, op2)), Some(overflow));
+            set_all_flags(result, Some(CPSR::addition_carries(result, op2, rn)), Some(overflow));
         }
         5 => {
             //adc
             let (result, overflow) = op2.overflowing_add(rn);
             let (result, overflow2) = result.overflowing_add(cpsr.C() as u32);
             *res = result;
+            //TODO: consider carry add
             set_all_flags(
-                *res,
-                Some(addition_carries(result, rn, op2)), //TODO: consider carry add
+                result,
+                Some(CPSR::addition_carries(result, op2, rn)),
                 Some(overflow || overflow2),
             );
         }
@@ -482,7 +468,7 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
         11 => {
             //cmn
             let (res, v) = rn.overflowing_add(op2);
-            set_all_flags(res, Some(addition_carries(res, rn, op2)), Some(v));
+            set_all_flags(res, Some(CPSR::addition_carries(res, rn, op2)), Some(v));
         }
         12 => {
             //or
@@ -510,6 +496,9 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
 }
 /// Move to Status Register
 fn MSR(cpu: &mut Cpu, opcode: u32) {
+    const FLAGS_MASK: u32 = 0xFF000000;
+    const STATE_MASK: u32 = 0x00000020;
+    const PRIVACY_MASK: u32 = 0x0000_00CF;
     dbg!("msr");
     let immediate = as_extra_flag(opcode);
     let (_, _, use_spsr, _, _) = as_flags(opcode);
@@ -521,28 +510,32 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
     } else {
         cpu.regs[(opcode & 0x0000_000F) as usize]
     };
-    //let operand = cpu.regs[(opcode & 0x0000_000F) as usize];
-    let old = cpu.cpsr.0;
-    // user mode => cpsr
 
-    let dest = if use_spsr { cpu.get_spsr_mut().unwrap() } else { &mut cpu.cpsr };
-    // TODO: priviledge check for allowance bits
-    const FLAGS_MASK: u32 = 0xFF000000;
-    const STATE_MASK: u32 = 0x00000020;
-    let valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
-        | (if change_flags_fields { FLAGS_MASK } else { 0 });
-    let invalid_bits_mask = !valid_bits_mask;
-    *dest = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
-    // Only set control flags of the cpsr/spsr if the `f` bit of the opcode is set
-    // and we're in priviledged mode (Not User)
-    if cpu.cpsr.mode() != CpuMode::User && change_control_fields {
-        dbg!("changing mode maybe");
-        dbg!(cpu.regs[14]);
-        cpu.set_mode(CpuMode::from_byte(((operand & 0x0000000F) | 0x00000010) as u8));
-        const PRIVACY_MASK: u32 = 0x0000_00CF;
-        cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
-        dbg!(cpu.regs[14]);
-    }
+    let current_mode = cpu.cpsr.mode();
+    if use_spsr {
+        // If modifying the spsr we can directly modify it
+        let spsr = cpu.get_spsr_mut().unwrap();
+        let old = spsr.0;
+        let mut valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
+            | (if change_flags_fields { FLAGS_MASK } else { 0 });
+        valid_bits_mask &= FLAGS_MASK | STATE_MASK | PRIVACY_MASK;
+        let invalid_bits_mask = !valid_bits_mask;
+        // I *think* I don't need to check for priviledged mode since user
+        // mode has no spsr
+        *spsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
+    } else {
+        // If modifying the cpsr, we must call the cpu's set_mode
+        // to change banks if necessary
+        let old = cpu.cpsr.0;
+        let valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
+            | (if change_flags_fields { FLAGS_MASK } else { 0 });
+        let invalid_bits_mask = !valid_bits_mask;
+        cpu.cpsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
+        if current_mode != CpuMode::User && change_control_fields {
+            cpu.set_mode(CpuMode::from_byte(((operand & 0x0000000F) | 0x00000010) as u8));
+            cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
+        }
+    };
 }
 /// Move to register from status register
 fn MRS(cpu: &mut Cpu, opcode: u32) {

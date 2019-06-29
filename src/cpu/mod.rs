@@ -40,10 +40,6 @@ pub struct Cpu {
     ///
     /// Swapped on mode change acordingly.
     pub(crate) cpsr: CPSR,
-    /// Mode specific cpsrs
-    ///
-    /// Swapped on mode change acordingly.
-    pub(crate) cpsr_banks: [CPSR; 6],
     /// Mode specific spsrs
     pub(crate) spsrs: [CPSR; 5],
     /// ROM contents
@@ -67,7 +63,6 @@ impl Cpu {
             all_modes_banks: [[0u32; 2]; 6],
             spsrs: [CPSR(0u32); 5],
             cpsr: CPSR(0u32),
-            cpsr_banks: [CPSR(0u32); 6],
             bios_rom: [0u8; 16 * KB],
             wram_board: [0u8; 256 * KB],
             wram_chip: [0u8; 32 * KB],
@@ -83,9 +78,10 @@ impl Cpu {
     }
     pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
         let mode = self.cpsr.mode();
-        if mode == CpuMode::Supervisor || mode == CpuMode::User {
+        if mode == CpuMode::Privileged || mode == CpuMode::User {
             None
         } else {
+            dbg!(self.cpsr.mode().as_usize() - 1);
             Some(&mut self.spsrs[self.cpsr.mode().as_usize() - 1])
         }
     }
@@ -121,8 +117,6 @@ impl Cpu {
         self.all_modes_banks[old_idx][1] = self.regs[14];
         self.regs[13] = self.all_modes_banks[new_idx][0];
         self.regs[14] = self.all_modes_banks[new_idx][1];
-        self.cpsr_banks[old_idx] = self.cpsr;
-        self.cpsr = self.cpsr_banks[new_idx];
     }
     pub(crate) fn pc(&mut self) -> &mut u32 {
         self.reg_mut(15)
@@ -138,33 +132,78 @@ impl Cpu {
         *self.reg_mut(reg)
     }
     /// Max valid addressable value is 224Mb
-    pub(crate) fn fetch_byte(&mut self, addr: u32) -> &mut u8 {
+    pub(crate) fn fetch_byte(&self, addr: u32) -> u8 {
         let addr = addr as usize;
         match addr {
             //General Internal Memory
             //BIOS - System ROM (16 KBytes) E3A02004
-            0x0000_0000..=0x0000_3FFF => &mut self.bios_rom[addr],
+            0x0000_0000..=0x0000_3FFF => self.bios_rom[addr],
             //WRAM - On-board Work RAM  (256 KBytes) 2 Wait
-            0x0200_0000..=0x0203_FFFF => &mut self.wram_board[addr - 0x0200_0000],
+            0x0200_0000..=0x0203_FFFF => self.wram_board[addr - 0x0200_0000],
             //WRAM - On-chip Work RAM   (32 KBytes)
-            0x0300_0000..=0x0300_7FFF => &mut self.wram_chip[addr - 0x0300_0000],
+            0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
             //I/O Registers             (1022 Bytes)
-            0x0400_0000..=0x0400_03FE => &mut self.wram_chip[000],
+            0x0400_0000..=0x0400_03FE => self.wram_chip[000],
             //Internal Display Memory
-            0x0500_0000..=0x0500_03FF => &mut self.palette_ram[addr - 0x0500_0000], /* BG/OBJ Palette RAM        (1 Kbyte) */
-            0x0600_0000..=0x0601_7FFF => &mut self.vram[addr - 0x0600_0000], /* VRAM - Video RAM          (96 KBytes) */
-            0x0700_0000..=0x0700_03FF => &mut self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
+            0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000], /* BG/OBJ Palette RAM        (1 Kbyte) */
+            0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000], /* VRAM - Video RAM          (96 KBytes) */
+            0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
             //External Memory (Game Pak)
-            0x0800_0000..=0x09FF_FFFF => &mut self.game_pak[addr - 0x0800_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
-            0x0A00_0000..=0x0BFF_FFFF => unimplemented!(), /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
-            0x0C00_0000..=0x0DFF_FFFF => unimplemented!(), /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
-            0x0E00_0000..=0x0E00_FFFF => unimplemented!(), /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-            _ => std::panic!(format!("Invalid address: {}", addr)),
+            // TODO: Wait states
+            0x0800_0000..=0x09FF_FFFF => self.game_pak[addr - 0x0800_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
+            0x0A00_0000..=0x0BFF_FFFF => self.game_pak[addr - 0x0A00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
+            0x0C00_0000..=0x0DFF_FFFF => self.game_pak[addr - 0x0C00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
+            0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr - 0x0E00_0000], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
+            _ => {println!("Invalid address: {}", addr); 0u8},
         }
     }
     /// The GBA cpu always runs in LE mode
-    pub(crate) fn write_u8(&mut self, addr: u32, value: u8) {
-        *self.fetch_byte(addr) = value as u8;
+    pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
+        let addr = addr as usize;
+        match addr {
+            //General Internal Memory
+            //BIOS - System ROM (16 KBytes) E3A02004
+            0x0000_0000..=0x0000_3FFF => {
+                self.bios_rom[addr] = byte;
+            }
+            //WRAM - On-board Work RAM  (256 KBytes) 2 Wait
+            0x0200_0000..=0x0203_FFFF => {
+                self.wram_board[addr - 0x0200_0000] = byte;
+            }
+            //WRAM - On-chip Work RAM   (32 KBytes)
+            0x0300_0000..=0x0300_7FFF => {
+                self.wram_chip[addr - 0x0300_0000] = byte;
+            }
+            //I/O Registers             (1022 Bytes)
+            0x0400_0000..=0x0400_03FE => {
+                self.wram_chip[000] = byte;
+            }
+            //Internal Display Memory
+            0x0500_0000..=0x0500_03FF => {
+                self.palette_ram[addr - 0x0500_0000] = byte;
+            } /* BG/OBJ Palette RAM        (1 Kbyte) */
+            0x0600_0000..=0x0601_7FFF => {
+                self.vram[addr - 0x0600_0000] = byte;
+            } /* VRAM - Video RAM          (96 KBytes) */
+            0x0700_0000..=0x0700_03FF => {
+                self.oam[addr - 0x0700_0000] = byte;
+            } /* OAM - OBJ Attributes      (1 Kbyte) */
+            //External Memory (Game Pak)
+            // TODO: Wait states
+            0x0800_0000..=0x09FF_FFFF => {
+                self.game_pak[addr - 0x0800_0000] = byte;
+            } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
+            0x0A00_0000..=0x0BFF_FFFF => {
+                self.game_pak[addr - 0x0A00_0000] = byte;
+            } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
+            0x0C00_0000..=0x0DFF_FFFF => {
+                self.game_pak[addr - 0x0C00_0000] = byte;
+            } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
+            0x0E00_0000..=0x0E00_FFFF => {
+                self.game_pak[addr - 0x0E00_0000] = byte;
+            } /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
+            _ => println!("Invalid address: {}", addr),
+        }
     }
     pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
         self.write_u8(addr, (value >> 8) as u8);
@@ -178,7 +217,7 @@ impl Cpu {
         self.write_u16(addr + 2, (value >> 16) as u16);
     }
     pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
-        u16::from(*self.fetch_byte(addr)) + (u16::from(*self.fetch_byte(addr + 1)) << 8)
+        u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8)
     }
     pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
         self.fetch_u16(addr) as u32 + ((self.fetch_u16(addr + 2) as u32) << 16)

@@ -14,8 +14,8 @@ fn as_low_11bits(opcode: u16) -> u16 {
     opcode & 0x07FF
 }
 /// 3 bit value (0-7)
-fn as_bits_8_to_10(opcode: u16) -> u16 {
-    (opcode >> 8) & 0x0003
+fn as_bits_8_to_10(opcode: u16) -> usize {
+    ((opcode >> 8) & 0x0003) as usize
 }
 /// 5 bit value (0-31)
 fn as_bits_6_to_10(opcode: u16) -> u16 {
@@ -25,10 +25,10 @@ fn as_bits_6_to_10(opcode: u16) -> u16 {
 /// Since these are often used as register numbers we return them as usizes
 fn as_lower_3bit_values(opcode: u16) -> (usize, usize, usize, usize) {
     (
-        (opcode & 0x0E00) as usize,
-        (opcode & 0x01C0) as usize,
-        (opcode & 0x0038) as usize,
-        (opcode & 0x0007) as usize,
+        ((opcode & 0x0E00) >> 9) as usize,
+        ((opcode & 0x01C0) >> 6) as usize,
+        ((opcode & 0x0038) >> 3) as usize,
+        ((opcode & 0x0007) >> 0) as usize,
     )
 }
 /// 8 bit value
@@ -64,19 +64,59 @@ fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
     let first_operand = cpu.regs[rs];
     let second_operand = if immediate { rn as u32 } else { cpu.regs[rn] };
     cpu.regs[rd] = if is_substraction {
-        first_operand - second_operand
+        let (result, overflow) = first_operand.overflowing_sub(second_operand);
+        cpu.cpsr.set_all_status_flags(
+            cpu.regs[rd],
+            Some(second_operand > first_operand),
+            Some(overflow),
+        );
+        result
     } else {
-        first_operand + second_operand
+        let (result, overflow) = first_operand.overflowing_add(second_operand);
+        cpu.cpsr.set_all_status_flags_for_addition(
+            cpu.regs[rd],
+            first_operand,
+            second_operand,
+            Some(overflow),
+        );
+        result
     };
-    //TODO: N,Z,C,V affected
-    unimplemented!()
+    cpu.clocks += 0; // TODO: clocks
 }
 /// Move, compare, add and substract immediate
 fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let offset = as_low_word(opcode);
+    let offset = as_low_word(opcode) as u32;
     let operation = as_bits_11_and_12(opcode);
-    unimplemented!()
+    let rd_val = cpu.regs[rd];
+    if operation == 1 {
+        // CMP handled separately since it doesnt store the result
+        let (res, overflow) = rd_val.overflowing_sub(offset);
+        cpu.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
+        cpu.clocks += 0; // TODO: clocks
+        return;
+    }
+    cpu.regs[rd] = match operation {
+        0 => {
+            // MOV
+            cpu.cpsr.set_all_status_flags(offset, None, None);
+            offset
+        }
+        2 => {
+            // ADD
+            let (res, overflow) = rd_val.overflowing_add(offset);
+            cpu.cpsr.set_all_status_flags_for_addition(res, rd_val, offset, Some(overflow));
+            res
+        }
+        3 => {
+            // SUB
+            let (res, overflow) = rd_val.overflowing_sub(offset);
+            cpu.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
+            res
+        }
+        _ => unimplemented!(), //std::hint::unreachable_unchecked()
+    };
+    cpu.clocks += 0; // TODO: clocks
 }
 fn alu_operation(cpu: &mut Cpu, opcode: u16) {
     let (_, _, rs, rd) = as_lower_3bit_values(opcode);
@@ -94,15 +134,40 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
 /// LDR PC
 fn pc_relative_load(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let word = as_low_word(opcode);
-    unimplemented!()
+    let word = as_low_word(opcode) as u32;
+    let word = word * 4; // In steps of 4
+    cpu.regs[rd] = cpu.fetch_u32(cpu.regs[15] + word);
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR
 fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
     let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
-    let L = as_11th_bit(opcode);
-    let B = (opcode & 0x0400) != 0;
-    unimplemented!()
+    let is_load = as_11th_bit(opcode);
+    let is_byte = (opcode & 0x0400) != 0; // else word(32bit)
+    dbg!(ro);
+    dbg!(rb);
+    println!("{:b}", opcode);
+    println!("{:x?}", opcode);
+    println!("{:x?}", cpu.regs[ro]);
+    println!("{:x?}", cpu.regs[rb]);
+    dbg!(cpu.regs[ro]);
+    dbg!(cpu.regs[rb]);
+    dbg!(rd);
+    let (addr, _) = cpu.regs[ro].overflowing_add(cpu.regs[rb]);
+    println!("{:x?}", addr);
+    println!("{}", addr);
+    println!("{}", is_load);
+    if is_load {
+        if is_byte {
+            // TODO: Does this zero extend the 32bit value?
+            cpu.write_u8(addr, cpu.regs[rd] as u8);
+        } else {
+            cpu.write_u32(addr, cpu.regs[rd]);
+        }
+    } else {
+        cpu.regs[rd] = if is_byte { cpu.fetch_byte(addr) as u32 } else { cpu.fetch_u32(addr) };
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
