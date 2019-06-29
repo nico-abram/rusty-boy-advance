@@ -140,8 +140,9 @@ impl Cpu {
             0x0000_0000..=0x0000_3FFF => self.bios_rom[addr],
             //WRAM - On-board Work RAM  (256 KBytes) 2 Wait
             0x0200_0000..=0x0203_FFFF => self.wram_board[addr - 0x0200_0000],
-            //WRAM - On-chip Work RAM   (32 KBytes)
+            //WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
             0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
+            0x0300_8000..=0x03FF_FFFF => self.wram_chip[addr - 0x0300_8000],
             //I/O Registers             (1022 Bytes)
             0x0400_0000..=0x0400_03FE => self.wram_chip[000],
             //Internal Display Memory
@@ -174,9 +175,12 @@ impl Cpu {
             0x0200_0000..=0x0203_FFFF => {
                 self.wram_board[addr - 0x0200_0000] = byte;
             }
-            //WRAM - On-chip Work RAM   (32 KBytes)
+            //WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
             0x0300_0000..=0x0300_7FFF => {
                 self.wram_chip[addr - 0x0300_0000] = byte;
+            }
+            0x0300_8000..=0x03FF_FFFF => {
+                self.wram_chip[addr - 0x0300_8000] = byte;
             }
             //I/O Registers             (1022 Bytes)
             0x0400_0000..=0x0400_03FE => {
