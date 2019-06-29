@@ -46,9 +46,9 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
             }
         }
         if frames_to_run == 0 {
-            cpu.run_once();
+            //cpu.run_one_frame();
         } else {
-            cpu.run_once();
+            cpu.run_one_frame();
             frames_left_to_run -= 1;
             if frames_left_to_run == 0 {
                 println!(

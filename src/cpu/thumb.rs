@@ -7,23 +7,28 @@
 use super::utils::AsBoolSlice;
 use super::Cpu;
 
+#[inline]
 fn as_11th_bit(opcode: u16) -> bool {
     (opcode & 0x0800) != 0
 }
 /// 11 bit value (0-1023)
+#[inline]
 fn as_low_11bits(opcode: u16) -> u16 {
     opcode & 0x07FF
 }
 /// 3 bit value (0-7)
+#[inline]
 fn as_bits_8_to_10(opcode: u16) -> usize {
     ((opcode >> 8) & 0x0003) as usize
 }
 /// 5 bit value (0-31)
+#[inline]
 fn as_bits_6_to_10(opcode: u16) -> u16 {
     (opcode >> 6) & 0x000F
 }
 /// 3 bit values (0-7)
 /// Since these are often used as register numbers we return them as usizes
+#[inline]
 fn as_lower_3bit_values(opcode: u16) -> (usize, usize, usize, usize) {
     (
         ((opcode & 0x0E00) >> 9) as usize,
@@ -33,10 +38,12 @@ fn as_lower_3bit_values(opcode: u16) -> (usize, usize, usize, usize) {
     )
 }
 /// 8 bit value
-fn as_low_word(opcode: u16) -> u8 {
+#[inline]
+fn as_low_byte(opcode: u16) -> u8 {
     opcode as u8
 }
 /// 2 bit value (0-3)
+#[inline]
 fn as_bits_11_and_12(opcode: u16) -> u16 {
     (opcode >> 10) & 0x3
 }
@@ -87,7 +94,7 @@ fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
 /// Move, compare, add and substract immediate
 fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let offset = as_low_word(opcode) as u32;
+    let offset = as_low_byte(opcode) as u32;
     let operation = as_bits_11_and_12(opcode);
     let rd_val = cpu.regs[rd];
     if operation == 1 {
@@ -121,23 +128,179 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
 }
 fn alu_operation(cpu: &mut Cpu, opcode: u16) {
     let (_, _, rs, rd) = as_lower_3bit_values(opcode);
-    let operation = (opcode >> 6) & 0x000F;
-    unimplemented!()
+    let operation = ((opcode >> 6) & 0x000F) as u8;
+    let (rs_val, rd_val) = (cpu.regs[rs], cpu.regs[rd]);
+    match operation {
+        0x0 => {
+            //AND
+            let res = rd_val & rs_val;
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, None, None);
+        }
+        0x1 => {
+            //EOR/XOR
+            let res = rd_val ^ rs_val;
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, None, None);
+        }
+        0x2 => {
+            //LSL (Logical Shift Left)
+            let result = rd_val << (rs_val & 0x00FF);
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                None,
+            );
+        }
+        0x3 => {
+            //LSR (Logical Shift Right)
+            let result = rd_val >> (rs_val & 0x00FF);
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                None,
+            );
+        }
+        0x4 => {
+            //ASR (Arithmetic Shift Right)
+            // TODO: Was the ASR just an i32 cast?
+            // TODO: GBATEK mentions SAR (Is that just the same thing?)
+            let result = ((rd_val as i32) << (rs_val & 0x00FF)) as u32;
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                None,
+            );
+        }
+        0x5 => {
+            // ADC (Add With Carry)
+            let (result, overflow) = rd_val.overflowing_add(rs_val);
+            let (result, overflow2) = result.overflowing_add(cpu.cpsr.C() as u32);
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                Some(unimplemented!("TODO: Carry")),
+                Some(overflow || overflow2),
+            );
+        }
+        0x6 => {
+            // SBC (Substract With Carry)
+            let (result, overflow) = rd_val.overflowing_sub(rs_val);
+            let (result, overflow2) = result.overflowing_sub((!cpu.cpsr.C()) as u32);
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                Some(unimplemented!("TODO: Carry")),
+                Some(overflow || overflow2),
+            );
+        }
+        0x7 => {
+            // ROR (Rotate Right)
+            let result = rd_val.rotate_right(rs_val);
+            cpu.regs[rd] = result;
+            cpu.cpsr.set_all_status_flags(result, Some(unimplemented!("TODO: Carry")), None);
+        }
+        0x8 => {
+            // TST (Test)
+            cpu.cpsr.set_all_status_flags(rd_val & rs_val, None, None);
+        }
+        0x9 => {
+            // NEG (Negate)
+            let result = !rs_val;
+            // TODO: Rd = 0 - Rs (Is this just binary not?)
+            cpu.regs[rd] = result;
+            // cpu.regs[rd] = 0.overflowing_sub(rs_val).0;
+            cpu.cpsr.set_all_status_flags(
+                result,
+                Some(unimplemented!("TODO: Carry")),
+                Some(unimplemented!("TODO: Overflow")),
+            );
+        }
+        0xA => {
+            // CMP (Compare)
+            let (res, overflow) = rd_val.overflowing_sub(rs_val);
+            cpu.cpsr.set_all_status_flags(res, Some(rs_val > rd_val), Some(overflow));
+        }
+        0xB => {
+            // CMN (Compare Negative)
+            let (res, overflow) = rd_val.overflowing_add(rs_val);
+            cpu.cpsr.set_all_status_flags(res, Some(unimplemented!()), Some(overflow));
+        }
+        0xC => {
+            // ORR (Logical OR)
+            let res = rd_val | rs_val;
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, None, None);
+        }
+        0xD => {
+            // MUL (Multiply)
+            let (res, _) = rd_val.overflowing_mul(rs_val);
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, Some(unimplemented!()), None);
+        }
+        0xE => {
+            // BIC (Bit clear)
+            let res = rd_val & (!rs_val);
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, None, None);
+        }
+        0xF => {
+            // MVN (Not)
+            let res = !rs_val;
+            cpu.regs[rd] = res;
+            cpu.cpsr.set_all_status_flags(res, None, None);
+        }
+        _ => unimplemented!("Impossible"),
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// HiReg/BX
 fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
     let (_, _, rs, rd) = as_lower_3bit_values(opcode);
-    let operation = opcode & 0x0300;
-    let h1 = (opcode & 0x0080) != 0;
-    let h2 = (opcode & 0x0040) != 0;
-    unimplemented!()
+    let msbs = (opcode & 0x0040) >> 6;
+    let msbd = (opcode & 0x0080) >> 7;
+    let operation = (opcode & 0x0300) >> 8;
+    let rs = rs + ((msbs as usize) << 3);
+    let rd = rd + ((msbd as usize) << 3);
+    //TODO: Only CMP affects CPSR condition flags!
+    match operation {
+        0 => {
+            // ADD
+            let (res, _) = cpu.regs[rd].overflowing_add(cpu.regs[rs]);
+            cpu.regs[rd] = res;
+        }
+        1 => {
+            //CMP
+            let (op1, op2) = (cpu.regs[rd], cpu.regs[rs]);
+            let (res, overflow) = op1.overflowing_sub(op2);
+            cpu.cpsr.set_all_status_flags(res, Some(op2 > op1), Some(overflow));
+        }
+        2 => {
+            // MOV
+            cpu.regs[rd] = cpu.regs[rs];
+        }
+        3 => {
+            // Ignore BLX since it's ARMv9
+            // BX
+            let rs_val = cpu.regs[rs];
+            cpu.regs[15] = rs_val;
+            // Change to ARM mode if bit 0 is 0
+            cpu.cpsr.set_T((rs_val & 0x0000_0001) != 0);
+            return;
+        }
+        _ => unimplemented!("Impossible"), //std::hint::unreachable_unchecked()
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR PC
 fn pc_relative_load(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let word = as_low_word(opcode) as u32;
-    let word = word * 4; // In steps of 4
-    cpu.regs[rd] = cpu.fetch_u32(cpu.regs[15] + word);
+    let byte = as_low_byte(opcode) as u32;
+    let offset = byte << 2; // In steps of 4
+    cpu.regs[rd] = cpu.fetch_u32(cpu.regs[15] + offset);
     cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR
@@ -145,19 +308,10 @@ fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
     let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
     let is_load = as_11th_bit(opcode);
     let is_byte = (opcode & 0x0400) != 0; // else word(32bit)
-    dbg!(ro);
-    dbg!(rb);
-    println!("{:b}", opcode);
-    println!("{:x?}", opcode);
-    println!("{:x?}", cpu.regs[ro]);
-    println!("{:x?}", cpu.regs[rb]);
-    dbg!(cpu.regs[ro]);
-    dbg!(cpu.regs[rb]);
-    dbg!(rd);
     let (addr, _) = cpu.regs[ro].overflowing_add(cpu.regs[rb]);
-    println!("{:x?}", addr);
-    println!("{}", addr);
-    println!("{}", is_load);
+    println!("{:x}", addr);
+    println!("{:x}", cpu.regs[rb]);
+    println!("{:x}", cpu.regs[ro]);
     if is_load {
         if is_byte {
             // TODO: Does this zero extend the 32bit value?
@@ -174,69 +328,189 @@ fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
 fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
     let H = as_11th_bit(opcode);
     let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
-    let S = (opcode & 0x0400) != 0;
-    unimplemented!()
+    let sign_extend = (opcode & 0x0400) != 0;
+    let addr = cpu.regs[rb].overflowing_add(cpu.regs[ro]).0;
+    if !H && !sign_extend {
+        cpu.write_u16(addr, cpu.regs[rd] as u16);
+        cpu.clocks += 0; // TODO: clocks
+        return;
+    }
+    cpu.regs[rd] = if H {
+        // Half-word(16 bits)
+        if sign_extend {
+            (cpu.fetch_u16(addr) as i16 as i32 as u32) // Sign extend
+        } else {
+            (cpu.fetch_u16(addr) as u32)
+        }
+    } else {
+        (cpu.fetch_byte(addr) as i8 as i32 as u32) // Sign extend
+    };
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR {B}
 fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) {
-    let B = (opcode & 0x1000) != 0;
-    let L = as_11th_bit(opcode);
+    let is_byte_else_word = (opcode & 0x1000) != 0;
+    let is_load_else_store = as_11th_bit(opcode);
     let (_, _, rb, rd) = as_lower_3bit_values(opcode);
-    let offset = as_bits_6_to_10(opcode);
-    unimplemented!()
+    let offset = as_bits_6_to_10(opcode) as u32;
+    let rb_val = cpu.regs[rb];
+    if is_byte_else_word {
+        let addr = offset + rb_val;
+        if is_load_else_store {
+            cpu.regs[rd] = cpu.fetch_byte(addr) as u32;
+        } else {
+            cpu.write_u8(addr, cpu.regs[rd] as u8);
+        }
+    } else {
+        let offset = offset << 2;
+        let addr = offset + rb_val;
+        if is_load_else_store {
+            cpu.regs[rd] = cpu.fetch_u32(addr);
+        } else {
+            cpu.write_u32(addr, cpu.regs[rd]);
+        }
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR {H}
 fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
-    let L = as_11th_bit(opcode);
+    let is_load_else_store = as_11th_bit(opcode);
     let (_, _, rb, rd) = as_lower_3bit_values(opcode);
     let offset = as_bits_6_to_10(opcode);
-    unimplemented!()
+    let offset = (offset as u32) << 1;
+    let addr = offset + cpu.regs[rb];
+    if is_load_else_store {
+        cpu.regs[rd] = cpu.fetch_u16(addr) as u32;
+    } else {
+        cpu.write_u16(addr, cpu.regs[rd] as u16);
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR SP
 fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) {
-    let L = as_11th_bit(opcode);
-    let word = as_low_word(opcode);
+    let is_load_else_store = as_11th_bit(opcode);
+    let byte = as_low_byte(opcode);
+    let offset = (byte as u32) << 2;
     let rd = as_bits_8_to_10(opcode);
-    unimplemented!()
+    let addr = cpu.regs[13] + offset;
+    if is_load_else_store {
+        cpu.regs[rd] = cpu.fetch_u32(addr);
+    } else {
+        cpu.write_u32(addr, cpu.regs[rd]);
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// LOAD PC/SP
 fn load_address(cpu: &mut Cpu, opcode: u16) {
-    let SP = as_11th_bit(opcode);
-    let word = as_low_word(opcode);
+    let load_sp_else_pc = as_11th_bit(opcode);
+    let byte = as_low_byte(opcode);
+    let nn = (byte as u32) << 2;
     let rd = as_bits_8_to_10(opcode);
-    unimplemented!()
+    cpu.regs[rd] = if load_sp_else_pc {
+        cpu.regs[13] + nn
+    } else {
+        //TODO: Is this right????
+        ((cpu.regs[15] + 4) & !2) + nn
+    };
+    cpu.clocks += 0; // TODO: clocks
 }
-/// ADD SP,nn
-fn add_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
-    let word = as_low_word(opcode);
-    let S = (word & 0x80) != 0;
-    let word7 = word >> 1;
-    unimplemented!()
+/// ADD/SUB SP,nn
+fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
+    let byte = as_low_byte(opcode);
+    let substract_else_add = (byte & 0x80) != 0;
+    let byte7 = byte & 0x0000_007F;
+    let offset = (byte7 as u32) << 2;
+    dbg!(offset);
+    let sp = cpu.regs[13];
+    cpu.regs[13] = if substract_else_add {
+        sp.overflowing_sub(offset).0
+    } else {
+        sp.overflowing_add(offset).0
+    };
+    cpu.clocks += 0; // TODO: clocks
 }
 /// PUSH/POP
 fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
-    let L = as_11th_bit(opcode);
-    let R = (opcode & 0x0100) != 0;
-    let rlist = as_low_word(opcode);
-    unimplemented!()
+    let is_pop_else_push = as_11th_bit(opcode);
+    // PUSH LR or POP PC
+    let pc_or_lr_flag = (opcode & 0x0100) != 0;
+    let rlist = as_low_byte(opcode);
+    let mut sp = cpu.regs[13];
+    if is_pop_else_push {
+        // TODO: Does this need reversing?
+        for (idx, _) in
+            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
+        {
+            cpu.regs[7 - idx] = cpu.fetch_u32(sp);
+            sp = sp + 4;
+        }
+        if pc_or_lr_flag {
+            cpu.regs[15] = cpu.fetch_u32(sp); // POP PC
+            sp = sp + 4;
+        }
+    } else {
+        // TODO: Does this need reversing?
+        for (idx, _) in
+            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
+        {
+            cpu.write_u32(sp, cpu.regs[7 - idx]);
+            dbg!(7 - idx);
+            sp = sp - 4;
+        }
+        if pc_or_lr_flag {
+            dbg!("LR");
+            cpu.write_u32(sp, cpu.regs[14]); // PUSH LR
+            sp = sp - 4;
+        }
+    }
+    cpu.regs[13] = sp;
+    cpu.clocks += 0; // TODO: clocks
 }
 /// STM/LDM
 fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
     let rb = as_bits_8_to_10(opcode);
-    let L = as_11th_bit(opcode);
-    let rlist = as_low_word(opcode);
-    unimplemented!()
+    let is_load_else_store = as_11th_bit(opcode);
+    let rlist = as_low_byte(opcode);
+    let mut addr = cpu.regs[rb];
+    // TODO: Should this be reversed?
+    if is_load_else_store {
+        for (idx, _) in
+            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
+        {
+            cpu.write_u32(addr, cpu.regs[7 - idx]);
+            addr += 4;
+        }
+    } else {
+        for (idx, _) in
+            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
+        {
+            cpu.regs[7 - idx] = cpu.fetch_u32(addr);
+            addr += 4;
+        }
+    }
+    cpu.clocks += 0; // TODO: clocks
 }
 /// B{COND}
 fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
-    let offset = as_low_word(opcode);
-    let cond = (opcode >> 8) & 0x000F;
-    unimplemented!()
+    let offset = (as_low_byte(opcode) as u32) << 1;
+    let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
+    let cond = (opcode << 4) & 0xF000;
+    let should_not_jump = super::arm::check_cond(cpu, (cond as u32) << 16);
+    if should_not_jump {
+        cpu.clocks += 0; // TODO: clocks
+        return;
+    }
+    cpu.regs[15] = if is_negative {
+        cpu.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
+    } else {
+        cpu.regs[15].overflowing_add(offset).0
+    };
+    cpu.clocks += 0; // TODO: clocks
 }
 /// SWI
 fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
-    let user_data = as_low_word(opcode);
-    unimplemented!()
+    super::arm::SWI(cpu, (opcode as u32) << 16);
+    cpu.clocks += 0; // TODO: clocks
 }
 /// B
 fn branch(cpu: &mut Cpu, opcode: u16) {
@@ -279,7 +553,7 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
         [T, F, F, F, _, _, _, _] => load_or_store_halfword,
         [T, F, F, T, _, _, _, _] => stack_pointer_relative_load_or_store,
         [T, F, T, F, _, _, _, _] => load_address,
-        [T, F, T, T, F, F, F, F] => add_offset_to_stack_pointer,
+        [T, F, T, T, F, F, F, F] => add_or_sub_offset_to_stack_pointer,
         [T, F, T, T, _, T, F, _] => push_or_pop,
         [T, T, F, F, _, _, _, _] => multiple_loads_or_stores,
         [T, T, F, T, T, T, T, T] => software_interrupt,
@@ -290,45 +564,12 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
         _ => unimplemented!(),
     }
 }
-fn decode_thumb_raw(opcode: u16) -> fn(&mut Cpu, u16) -> () {
-    let bits15_8 = (opcode >> 8) as u8;
-    const T: bool = true;
-    const F: bool = false;
-    match bits15_8 {
-        x if (x & 0b11111100) == 0b00011100 => add_or_sub,
-        x if (x & 0b11100000) == 0b00000000 => move_shifted_register,
-        x if (x & 0b11100000) == 0b00100000 => immediate_operation,
-        x if (x & 0b11111100) == 0b01000000 => alu_operation,
-        x if (x & 0b11111100) == 0b01000100 => high_register_operations_or_bx,
-        x if (x & 0b11111000) == 0b01001000 => pc_relative_load,
-        x if (x & 0b11110010) == 0b01010000 => load_or_store_with_relative_offset,
-        x if (x & 0b11110010) == 0b01010010 => load_or_store_sign_extended_byte_or_halfword,
-        x if (x & 0b11100000) == 0b01100000 => load_or_store_with_immediate_offset,
-        x if (x & 0b11110000) == 0b10000000 => load_or_store_halfword,
-        x if (x & 0b11110000) == 0b10010000 => stack_pointer_relative_load_or_store,
-        x if (x & 0b11110000) == 0b10100000 => load_address,
-        x if (x & 0b11111111) == 0b10110000 => add_offset_to_stack_pointer,
-        x if (x & 0b10110110) == 0b10110100 => push_or_pop,
-        x if (x & 0b11110000) == 0b11000000 => multiple_loads_or_stores,
-        x if (x & 0b11111111) == 0b1101111 => software_interrupt,
-        x if (x & 0b11110000) == 0b11010000 => conditional_branch,
-        x if (x & 0b11111000) == 0b11100000 => branch,
-        x if (x & 0b11110000) == 0b11110000 => branch_and_link_or_link_and_exchange,
-        //TODO: the rest
-        _ => unimplemented!(),
-    }
-}
 
 pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
     let pc = *cpu.pc();
     let opcode = cpu.fetch_u16(pc);
     *cpu.pc() += 2;
     println!("{:x}", opcode);
-    /*
-    if check_cond(cpu, opcode) {
-      return;
-    }
-    */
     let instruction = decode_thumb(opcode);
     instruction(cpu, opcode);
 }
@@ -357,7 +598,7 @@ mod tests {
             [T, F, F, F, _, _, _, _] => load_or_store_halfword,
             [T, F, F, T, _, _, _, _] => stack_pointer_relative_load_or_store,
             [T, F, T, F, _, _, _, _] => load_address,
-            [T, F, T, T, F, F, F, F] => add_offset_to_stack_pointer,
+            [T, F, T, T, F, F, F, F] => add_or_sub_offset_to_stack_pointer,
             [T, F, T, T, _, T, F, _] => push_or_pop,
             [T, T, F, F, _, _, _, _] => multiple_loads_or_stores,
             [T, T, F, T, T, T, T, T] => software_interrupt,
@@ -384,7 +625,7 @@ mod tests {
             x if (x & 0b11110000) == 0b10000000 => load_or_store_halfword,
             x if (x & 0b11110000) == 0b10010000 => stack_pointer_relative_load_or_store,
             x if (x & 0b11110000) == 0b10100000 => load_address,
-            x if (x & 0b11111111) == 0b10110000 => add_offset_to_stack_pointer,
+            x if (x & 0b11111111) == 0b10110000 => add_or_sub_offset_to_stack_pointer,
             x if (x & 0b10110110) == 0b10110100 => push_or_pop,
             x if (x & 0b11110000) == 0b11000000 => multiple_loads_or_stores,
             x if (x & 0b11111111) == 0b1101111 => software_interrupt,

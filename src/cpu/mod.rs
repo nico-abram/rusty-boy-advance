@@ -154,7 +154,11 @@ impl Cpu {
             0x0A00_0000..=0x0BFF_FFFF => self.game_pak[addr - 0x0A00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
             0x0C00_0000..=0x0DFF_FFFF => self.game_pak[addr - 0x0C00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
             0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr - 0x0E00_0000], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-            _ => {println!("Invalid address: {}", addr); 0u8},
+            _ => {
+                unimplemented!();
+                println!("Invalid address: {}", addr);
+                0u8
+            }
         }
     }
     /// The GBA cpu always runs in LE mode
@@ -202,7 +206,10 @@ impl Cpu {
             0x0E00_0000..=0x0E00_FFFF => {
                 self.game_pak[addr - 0x0E00_0000] = byte;
             } /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-            _ => println!("Invalid address: {}", addr),
+            _ => {
+                unimplemented!();
+                println!("Invalid address: {}", addr)
+            }
         }
     }
     pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
@@ -270,7 +277,7 @@ impl Cpu {
         let pc = *self.pc();
         format!("Registers: {:x?}\n PC:{:x} {}", self.regs, pc, self.cpsr.to_string())
     }
-    pub fn run_once(&mut self) {
+    pub fn run_one_instruction(&mut self) {
         println!("{}", self.state_as_string());
         if self.thumb() {
             thumb::execute_one_instruction(self);
@@ -278,9 +285,15 @@ impl Cpu {
             arm::execute_one_instruction(self);
         }
     }
+    pub fn run_one_frame(&mut self) {
+        // TODO: However this is meant to be done
+        loop {
+            self.run_one_instruction();
+        }
+    }
     pub fn run_forever(&mut self) {
         loop {
-            self.run_once();
+            self.run_one_frame();
         }
     }
     pub(crate) fn vblank(&mut self) -> u32 {

@@ -42,9 +42,20 @@ fn main() -> Result<(), String> {
                 .takes_value(false)
                 .required(false),
         )
+        .arg(
+            Arg::with_name("instructions")
+                .short("i")
+                .long("instructions-to-run")
+                .value_name("Instructions")
+                .help("Number of instructions to execute before stopping. Forces headless")
+                .takes_value(true)
+                .required(false),
+        )
         .get_matches();
 
     let frames_to_run = matches.value_of("frames").unwrap().parse::<u32>().unwrap_or(0u32);
+    let instructions_to_run =
+        matches.value_of("instructions").unwrap().parse::<u32>().unwrap_or(0u32);
     let rom_filename = matches.value_of("rom").unwrap();
     let headless = matches.is_present("headless");
 
@@ -54,10 +65,14 @@ fn main() -> Result<(), String> {
     let reader = std::io::BufReader::new(file);
     cpu.load(reader);
 
-    if headless {
+    if instructions_to_run > 0 {
+        for _ in 0..instructions_to_run {
+            cpu.run_one_instruction();
+        }
+    } else if headless {
         if frames_to_run != 0 {
             for _ in 0..frames_to_run {
-                cpu.run_once();
+                cpu.run_one_frame();
             }
         } else {
             cpu.run_forever();
