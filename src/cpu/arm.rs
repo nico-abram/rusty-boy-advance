@@ -136,8 +136,8 @@ fn BX(cpu: &mut Cpu, opcode: u32) {
     let switch_to_thumb = (jmp_addr & 0x0000_0001) != 0;
     if switch_to_thumb {
         jmp_addr -= 1;
+        cpu.cpsr.set_T(true);
     }
-    cpu.cpsr.set_T(switch_to_thumb);
     *cpu.pc() = jmp_addr;
 }
 /// Branch or Branch and link
@@ -147,9 +147,9 @@ fn BX(cpu: &mut Cpu, opcode: u32) {
 fn B(cpu: &mut Cpu, opcode: u32) {
     cpu.clocks += 3; // TODO: Clocks
     let offset = opcode & 0x00FF_FFFF;
-    let is_branch_and_link = opcode & 0x0100_0000;
-    if is_branch_and_link == 1 {
-        *cpu.LR() = *cpu.pc() + 4;
+    let is_branch_and_link = (opcode & 0x0100_0000) != 0;
+    if is_branch_and_link {
+        *cpu.LR() = *cpu.pc();
     }
     *cpu.pc() += 4 + offset * 4;
 }
@@ -297,11 +297,18 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
 /// This handles all ALU operations
 fn ALU(cpu: &mut Cpu, opcode: u32) {
     let immediate = as_extra_flag(opcode);
-    let (rn, rd, _, _, _) = as_usize_nibbles(opcode);
+    let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
+    dbg!(rn_num);
+    dbg!(rd);
     let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
     let set_condition_flags = (opcode & 0x0010_0000) != 0 || rd == 15;
-    let rn = *cpu.reg_mut(rn);
-    let psr_opcode = ((opcode & 0x01E0_0000) >> 21) as u8;
+    dbg!(set_condition_flags);
+    dbg!(rd);
+    let mut rn = cpu.regs[rn_num];
+    if rn_num == 15 {
+        rn += 4; // Account for PC pipelining
+    }
+    let operation = ((opcode & 0x01E0_0000) >> 21) as u8;
     let (op2, shift_carry) = if immediate {
         let ror_shift = (third_byte as u32) * 2;
         let val = (lowest_byte + second_byte * 16) as u32;
@@ -378,10 +385,12 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
                 ref_cpsr.set_V(overflow);
             }
             ref_cpsr.set_N((res & 0x8000_0000) != 0);
+            dbg!("setting Z to");
+            dbg!(res);
             ref_cpsr.set_Z(res == 0x0000_0000);
         }
     };
-    match psr_opcode as u8 {
+    match operation as u8 {
         0 => {
             //AND
             *res = rn & op2;
@@ -453,8 +462,12 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
             }
         }
         9 => {
+            dbg!("teq");
+            dbg!(rn);
+            dbg!(op2);
             //teq
             let res = rn ^ op2;
+            dbg!(res);
             if rd == 15 {
                 set_all_flags(res, None, None);
             } else {
@@ -497,41 +510,45 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
 }
 /// Move to Status Register
 fn MSR(cpu: &mut Cpu, opcode: u32) {
+    dbg!("msr");
     let immediate = as_extra_flag(opcode);
-    let (_, _, use_current_cpsr, _, _) = as_flags(opcode);
-    let control_flags = (opcode & 0x0008_0000) != 0; // i.e overflow/zero/etc
-    let control_fields = (opcode & 0x0001_0000) != 0; // mode, thumb, etc
-    let operand = cpu.regs[(opcode & 0x0000_000F) as usize];
-    let val = if immediate {
+    let (_, _, use_spsr, _, _) = as_flags(opcode);
+    let change_flags_fields = (opcode & 0x0008_0000) != 0; // i.e overflow/zero/etc
+    let change_control_fields = (opcode & 0x0001_0000) != 0; // mode, thumb, etc
+    let operand = if immediate {
         let (_, _, shift, second, first) = as_u8_nibbles(opcode);
         ((first as u32) + (second as u32) * 16).rotate_right(2 * (shift as u32))
     } else {
         cpu.regs[(opcode & 0x0000_000F) as usize]
     };
+    //let operand = cpu.regs[(opcode & 0x0000_000F) as usize];
     let old = cpu.cpsr.0;
-    let dest = if use_current_cpsr && cpu.cpsr.mode() != CpuMode::User {
-        &mut cpu.spsr[cpu.cpsr.mode().as_usize()]
-    } else {
-        &mut cpu.cpsr
-    };
+    // user mode => cpsr
+
+    let dest = if use_spsr { cpu.get_spsr_mut().unwrap() } else { &mut cpu.cpsr };
     // TODO: priviledge check for allowance bits
     const FLAGS_MASK: u32 = 0xFF000000;
     const STATE_MASK: u32 = 0x00000020;
-    let valid_bits_mask: u32 = (if control_fields { STATE_MASK } else { 0 })
-        | (if control_flags { FLAGS_MASK } else { 0 });
+    let valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
+        | (if change_flags_fields { FLAGS_MASK } else { 0 });
     let invalid_bits_mask = !valid_bits_mask;
-    *dest = CPSR((old & invalid_bits_mask) | (val & valid_bits_mask));
-    if cpu.cpsr.mode() != CpuMode::User && control_fields {
+    *dest = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
+    // Only set control flags of the cpsr/spsr if the `f` bit of the opcode is set
+    // and we're in priviledged mode (Not User)
+    if cpu.cpsr.mode() != CpuMode::User && change_control_fields {
+        dbg!("changing mode maybe");
+        dbg!(cpu.regs[14]);
         cpu.set_mode(CpuMode::from_byte(((operand & 0x0000000F) | 0x00000010) as u8));
         const PRIVACY_MASK: u32 = 0x0000_00CF;
         cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
+        dbg!(cpu.regs[14]);
     }
 }
 /// Move to register from status register
 fn MRS(cpu: &mut Cpu, opcode: u32) {
-    let (_, _, use_mode_cpsr, _, _) = as_flags(opcode);
+    let (_, _, use_spsr, _, _) = as_flags(opcode);
     cpu.regs[((opcode & 0x0000_F000) >> 12) as usize] =
-        if use_mode_cpsr { cpu.cpsr.0 } else { cpu.spsr[cpu.cpsr.mode().as_usize()].0 };
+        if use_spsr { cpu.get_spsr_mut().unwrap().0 } else { cpu.cpsr.0 };
 }
 /// Coprocessor Data Transfer (Unimplemented)
 fn CDT(cpu: &mut Cpu, opcode: u32) {

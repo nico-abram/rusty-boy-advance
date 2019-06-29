@@ -12,7 +12,7 @@ pub(crate) enum CpuMode {
     Privileged,
 }
 impl CpuMode {
-    /// Returns a number in the 0-5 range.
+    /// Returns a number in the 0-5 range. Both User and Priviledged(Systen) use 0. 
     ///
     /// Used to index the array of register banks.
     pub(crate) fn as_usize(&self) -> usize {

@@ -10,7 +10,7 @@ fn is_set(x: u32, bit: u32) -> bool {
 impl CPSR {
     pub(crate) fn to_string(&self) -> String {
         format!(
-            "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{}",
+            "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{} mode:{:x?}",
             self.N(),
             self.C(),
             self.Z(),
@@ -18,14 +18,15 @@ impl CPSR {
             self.Q(),
             self.I(),
             self.F(),
-            self.T()
+            self.T(),
+            self.mode()
         )
     }
     fn is_set(&self, bit: u32) -> bool {
         is_set(self.0, bit)
     }
-    fn set(&mut self, bit: u32) {
-        self.0 |= bit;
+    fn set(&mut self, bit: u32, set_it_to_true: bool) {
+        self.0 = (self.0 & (!bit)) | (if set_it_to_true { bit } else { 0 });
     }
     /// Sign(Negative)
     pub(crate) fn N(&self) -> bool {
@@ -33,7 +34,7 @@ impl CPSR {
     }
     /// Sign(Negative)
     pub(crate) fn set_N(&mut self, v: bool) {
-        self.set(if v { 0x8000_0000 } else { 0u32 })
+        self.set(0x8000_0000, v)
     }
     /// Zero
     pub(crate) fn Z(&self) -> bool {
@@ -41,7 +42,7 @@ impl CPSR {
     }
     /// Zero
     pub(crate) fn set_Z(&mut self, v: bool) {
-        self.set(if v { 0x4000_0000 } else { 0u32 })
+        self.set(0x4000_0000, v)
     }
     /// Carry
     pub(crate) fn C(&self) -> bool {
@@ -49,7 +50,7 @@ impl CPSR {
     }
     /// Carry
     pub(crate) fn set_C(&mut self, v: bool) {
-        self.set(if v { 0x2000_0000 } else { 0u32 })
+        self.set(0x2000_0000, v)
     }
     /// Overflow
     pub(crate) fn V(&self) -> bool {
@@ -57,7 +58,7 @@ impl CPSR {
     }
     /// Overflow
     pub(crate) fn set_V(&mut self, v: bool) {
-        self.set(if v { 0x1000_0000 } else { 0u32 })
+        self.set(0x1000_0000, v)
     }
     /// Sticky overflow
     pub(crate) fn Q(&self) -> bool {
@@ -65,7 +66,7 @@ impl CPSR {
     }
     // Sticky overflow
     pub(crate) fn set_Q(&mut self, v: bool) {
-        self.set(if v { 0x0800_0000 } else { 0u32 })
+        self.set(0x0800_0000, v)
     }
     /// IRQ disabled
     pub(crate) fn I(&self) -> bool {
@@ -73,7 +74,7 @@ impl CPSR {
     }
     /// Disable IRQ
     pub(crate) fn set_I(&mut self, v: bool) {
-        self.set(if v { 0x0000_0080 } else { 0u32 })
+        self.set(0x0000_0080, v)
     }
     /// Fiq disabled
     pub(crate) fn F(&self) -> bool {
@@ -81,7 +82,7 @@ impl CPSR {
     }
     /// Disable Fiq
     pub(crate) fn set_F(&mut self, v: bool) {
-        self.set(if v { 0x0000_0040 } else { 0u32 })
+        self.set(0x0000_0040, v)
     }
     /// State/Thumb (thumb=1/true)
     pub(crate) fn T(&self) -> bool {
@@ -89,7 +90,7 @@ impl CPSR {
     }
     /// State/Thumb (thumb=1/true)
     pub(crate) fn set_T(&mut self, v: bool) {
-        self.set(if v { 0x0000_0020 } else { 0u32 })
+        self.set(0x0000_0020, v)
     }
     /// Get priviledge mode
     pub(crate) fn mode(&self) -> CpuMode {

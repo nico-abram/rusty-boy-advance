@@ -40,10 +40,12 @@ pub struct Cpu {
     ///
     /// Swapped on mode change acordingly.
     pub(crate) cpsr: CPSR,
-    /// Mode specific register banks.
+    /// Mode specific cpsrs
     ///
     /// Swapped on mode change acordingly.
-    pub(crate) spsr: [CPSR; 6],
+    pub(crate) cpsr_banks: [CPSR; 6],
+    /// Mode specific spsrs
+    pub(crate) spsrs: [CPSR; 5],
     /// ROM contents
     game_pak: [u8; 64 * KB],
     bios_rom: [u8; 16 * KB],
@@ -63,8 +65,9 @@ impl Cpu {
             regs: [0u32; 16],
             fiq_only_banks: [[0u32; 5]; 2],
             all_modes_banks: [[0u32; 2]; 6],
-            spsr: [CPSR(0u32); 6],
+            spsrs: [CPSR(0u32); 5],
             cpsr: CPSR(0u32),
+            cpsr_banks: [CPSR(0u32); 6],
             bios_rom: [0u8; 16 * KB],
             wram_board: [0u8; 256 * KB],
             wram_chip: [0u8; 32 * KB],
@@ -77,6 +80,14 @@ impl Cpu {
         cpu.reset();
         cpu.bios_rom.clone_from_slice(include_bytes!("gba_bios.bin")); // Bios also taken from mrgba
         cpu
+    }
+    pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
+        let mode = self.cpsr.mode();
+        if mode == CpuMode::Supervisor || mode == CpuMode::User {
+            None
+        } else {
+            Some(&mut self.spsrs[self.cpsr.mode().as_usize() - 1])
+        }
     }
     pub(crate) fn set_mode(&mut self, new_mode: CpuMode) {
         let old_mode = self.cpsr.mode();
@@ -104,12 +115,14 @@ impl Cpu {
         }
         let new_idx = new_mode.as_usize();
         let old_idx = old_mode.as_usize();
+        // TODO:
+        // std::mem::swap(x: &mut T, y: &mut T); // Can I use mem swap here?
         self.all_modes_banks[old_idx][0] = self.regs[13];
         self.all_modes_banks[old_idx][1] = self.regs[14];
         self.regs[13] = self.all_modes_banks[new_idx][0];
         self.regs[14] = self.all_modes_banks[new_idx][1];
-        self.spsr[old_idx] = self.cpsr;
-        self.cpsr = self.spsr[new_idx];
+        self.cpsr_banks[old_idx] = self.cpsr;
+        self.cpsr = self.cpsr_banks[new_idx];
     }
     pub(crate) fn pc(&mut self) -> &mut u32 {
         self.reg_mut(15)
@@ -176,7 +189,7 @@ impl Cpu {
         self.output_texture = [0u32; 240 * 160];
         self.fiq_only_banks = [[0u32; 5]; 2];
         self.all_modes_banks = [[0u32; 2]; 6];
-        self.spsr = [CPSR(0x0000_001F); 6];
+        self.spsrs = [CPSR(0x0000_0000F); 5];
         self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x3007fa0;
         self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x3007fe0;
         self.cpsr = CPSR(0x0000_001F);
