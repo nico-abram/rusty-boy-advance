@@ -81,10 +81,14 @@ mod tests {
   }
   #[bench]
   fn bench_add_two(b: &mut Bencher) {
-    b.iter(|| (0..100000u32).fold(0u8, |old, new| old + weird_bit_math(new as u8)));
+    b.iter(|| {
+      (0..100000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math(new as u8)).0)
+    });
   }
   #[bench]
   fn bench_add_two_raw(b: &mut Bencher) {
-    b.iter(|| (0..100000u32).fold(0u8, |old, new| old + weird_bit_math_raw(new as u8)));
+    b.iter(|| {
+      (0..100000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math_raw(new as u8)).0)
+    });
   }
 }
