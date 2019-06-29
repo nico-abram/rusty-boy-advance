@@ -22,12 +22,13 @@ fn as_bits_6_to_10(opcode: u16) -> u16 {
     (opcode >> 6) & 0x000F
 }
 /// 3 bit values (0-7)
-fn as_lower_3bit_values(opcode: u16) -> (u8, u8, u8, u8) {
+/// Since these are often used as register numbers we return them as usizes
+fn as_lower_3bit_values(opcode: u16) -> (usize, usize, usize, usize) {
     (
-        (opcode & 0x0E00) as u8,
-        (opcode & 0x01C0) as u8,
-        (opcode & 0x0038) as u8,
-        (opcode & 0x0007) as u8,
+        (opcode & 0x0E00) as usize,
+        (opcode & 0x01C0) as usize,
+        (opcode & 0x0038) as usize,
+        (opcode & 0x0007) as usize,
     )
 }
 /// 8 bit value
@@ -43,12 +44,31 @@ fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
     let operation = as_bits_11_and_12(opcode);
     let (_, _, rs, rd) = as_lower_3bit_values(opcode);
     let offset = as_bits_6_to_10(opcode);
-    unimplemented!()
+    let operand = cpu.regs[rs];
+    // TODO: Special 0 shifts
+    cpu.regs[rd] = match operation {
+        0 => operand << offset,
+        1 => operand >> offset,
+        2 => ((operand as i32) >> offset) as u32,
+        3 => unimplemented!("reserved"),
+        _ => unimplemented!("Impossible?"), //std::hint::unreachable_unchecked()
+    };
+    //TODO: Z=zeroflag, N=sign, C=carry (except LSL#0: C=unchanged), V=unchanged.
+    cpu.clocks += 0; // TODO: clocks
 }
 /// ADD/SUB
 fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
     let (_, rn, rs, rd) = as_lower_3bit_values(opcode);
-    let operation = (opcode & 0x0200) != 0;
+    let immediate = (opcode & 0x0400) != 0;
+    let is_substraction = (opcode & 0x0200) != 0;
+    let first_operand = cpu.regs[rs];
+    let second_operand = if immediate { rn as u32 } else { cpu.regs[rn] };
+    cpu.regs[rd] = if is_substraction {
+        first_operand - second_operand
+    } else {
+        first_operand + second_operand
+    };
+    //TODO: N,Z,C,V affected
     unimplemented!()
 }
 /// Move, compare, add and substract immediate
@@ -154,14 +174,27 @@ fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
 }
 /// B
 fn branch(cpu: &mut Cpu, opcode: u16) {
-    let offset = as_low_11bits(opcode);
-    unimplemented!()
+    let offset = (opcode & 0x01FF) as u32;
+    let offset = offset << 1;
+    let is_negative = (opcode & 0x0200) != 0;
+    let pc = *cpu.pc();
+    *cpu.pc() = if is_negative { pc - offset } else { pc + offset };
+    cpu.clocks += 0; // TODO: clocks
 }
 /// BL/BLX
+///
+/// This is actually a 32 bit instruction (2 thumb instructions).
+///
+/// The first one has the upper 11 bits and the second the lower 11
 fn branch_and_link_or_link_and_exchange(cpu: &mut Cpu, opcode: u16) {
-    let offset = as_low_11bits(opcode);
-    let H = as_11th_bit(opcode);
-    unimplemented!()
+    //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
+    let upper_offset = as_low_11bits(opcode) as u32;
+    let pc = *cpu.pc();
+    let next_instruction = cpu.fetch_u16(pc);
+    let lower_offset = as_low_11bits(next_instruction) as u32;
+    cpu.regs[14] = (pc + 2) | 1u32;
+    *cpu.pc() = pc + 2 + (lower_offset << 1) + (upper_offset << 12);
+    cpu.clocks += 0; // TODO: clocks
 }
 fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
     let bits15_8 = (opcode >> 8) as u8;
