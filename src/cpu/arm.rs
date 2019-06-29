@@ -14,7 +14,7 @@ macro_rules! dbgx {
     };
 }
 
-enum Cond {
+pub(crate) enum Cond {
     /// Equal (Z)
     EQ,
     /// Not Equal (Not Z)
@@ -49,7 +49,8 @@ enum Cond {
     NV,
 }
 /// Map the opcode's upper nibble to the Cond enum
-fn opcode_to_cond(opcode: u32) -> Cond {
+#[inline]
+pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
     match (opcode >> 28) as u8 {
         0x0 => Cond::EQ,
         0x1 => Cond::NE,
@@ -71,7 +72,8 @@ fn opcode_to_cond(opcode: u32) -> Cond {
     }
 }
 /// Check if the condition for the given opcode is true
-fn check_cond(cpu: &mut Cpu, opcode: u32) -> bool {
+#[inline]
+pub(crate) fn check_cond(cpu: &mut Cpu, opcode: u32) -> bool {
     let applies = match opcode_to_cond(opcode) {
         Cond::EQ => cpu.cpsr.Z(),
         Cond::NE => !cpu.cpsr.Z(),
@@ -97,6 +99,7 @@ fn check_cond(cpu: &mut Cpu, opcode: u32) -> bool {
 }
 
 /// Get the lower 5 nibbles (2.5 bytes) as bytes
+#[inline]
 fn as_u8_nibbles(opcode: u32) -> (u8, u8, u8, u8, u8) {
     (
         ((opcode & 0x000F_0000) >> 16) as u8,
@@ -107,11 +110,13 @@ fn as_u8_nibbles(opcode: u32) -> (u8, u8, u8, u8, u8) {
     )
 }
 /// Get the lower 5 nibbles (2.5 bytes) as usizes
+#[inline]
 fn as_usize_nibbles(opcode: u32) -> (usize, usize, usize, usize, usize) {
     let (b0, b1, b2, b3, b4) = as_u8_nibbles(opcode);
     (b0 as usize, b1 as usize, b2 as usize, b3 as usize, b4 as usize)
 }
 /// Get bits 23-27 as bools
+#[inline]
 fn as_flags(opcode: u32) -> (bool, bool, bool, bool, bool) {
     (
         (opcode & 0x0100_0000) != 0,
@@ -122,6 +127,7 @@ fn as_flags(opcode: u32) -> (bool, bool, bool, bool, bool) {
     )
 }
 /// Get bit 25 as bool
+#[inline]
 fn as_extra_flag(opcode: u32) -> bool {
     (opcode & 0x0200_0000) != 0
 }
@@ -156,10 +162,10 @@ fn B(cpu: &mut Cpu, opcode: u32) {
 /// Software Interrupt
 ///
 /// Used to call BIOS functions
-fn SWI(cpu: &mut Cpu, opcode: u32) {
+pub(crate) fn SWI(cpu: &mut Cpu, opcode: u32) {
     cpu.set_mode(CpuMode::Supervisor);
     *cpu.pc() = SWI_HANDLER;
-    cpu.cpsr.set_T(false);
+    cpu.cpsr.set_T(false); // Set ARM state
     cpu.cpsr.set_I(true);
     cpu.clocks += 0; // todo:clocks
 }
@@ -298,12 +304,8 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
 fn ALU(cpu: &mut Cpu, opcode: u32) {
     let immediate = as_extra_flag(opcode);
     let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
-    dbg!(rn_num);
-    dbg!(rd);
     let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
     let set_condition_flags = (opcode & 0x0010_0000) != 0 || rd == 15;
-    dbg!(set_condition_flags);
-    dbg!(rd);
     let mut rn = cpu.regs[rn_num];
     if rn_num == 15 {
         rn += 4; // Account for PC pipelining
