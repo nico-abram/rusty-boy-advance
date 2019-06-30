@@ -19,12 +19,12 @@ fn as_low_11bits(opcode: u16) -> u16 {
 /// 3 bit value (0-7)
 #[inline]
 fn as_bits_8_to_10(opcode: u16) -> usize {
-    ((opcode >> 8) & 0x0003) as usize
+    ((opcode >> 8) & 0x0007) as usize
 }
 /// 5 bit value (0-31)
 #[inline]
 fn as_bits_6_to_10(opcode: u16) -> u16 {
-    (opcode >> 6) & 0x000F
+    (opcode >> 6) & 0x001F
 }
 /// 3 bit values (0-7)
 /// Since these are often used as register numbers we return them as usizes
@@ -45,7 +45,7 @@ fn as_low_byte(opcode: u16) -> u8 {
 /// 2 bit value (0-3)
 #[inline]
 fn as_bits_11_and_12(opcode: u16) -> u16 {
-    (opcode >> 10) & 0x3
+    (opcode >> 11) & 0x3
 }
 
 fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
@@ -96,6 +96,8 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
     let offset = as_low_byte(opcode) as u32;
     let operation = as_bits_11_and_12(opcode);
+    println!("{:x}", opcode);
+    println!("{:x}", operation);
     let rd_val = cpu.regs[rd];
     if operation == 1 {
         // CMP handled separately since it doesnt store the result
@@ -104,6 +106,8 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
         cpu.clocks += 0; // TODO: clocks
         return;
     }
+    dbg!(rd);
+    println!("{:x}", offset);
     cpu.regs[rd] = match operation {
         0 => {
             // MOV
@@ -126,6 +130,15 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     };
     cpu.clocks += 0; // TODO: clocks
 }
+fn carry_from(op1: u32, op2: u32, result: u32) -> bool {
+    ((op1 >> 31) + (op2 >> 31)) > (result >> 31)
+}
+fn borrow_from(positive: u32, negative: u32, result: u32) -> bool {
+    positive >= negative
+}
+fn sign_flag(N: u32) -> bool {
+    (N >> 31) == 1
+}
 fn alu_operation(cpu: &mut Cpu, opcode: u16) {
     let (_, _, rs, rd) = as_lower_3bit_values(opcode);
     let operation = ((opcode >> 6) & 0x000F) as u8;
@@ -145,33 +158,34 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
         }
         0x2 => {
             //LSL (Logical Shift Left)
-            let result = rd_val << (rs_val & 0x00FF);
+            let rs_val = rs_val & 0x00FF;
+            let (result, _) = rd_val.overflowing_shl(rs_val);
             cpu.regs[rd] = result;
             cpu.cpsr.set_all_status_flags(
                 result,
-                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                if rs_val == 0 { None } else { Some((rd_val >> (32 - rs_val)) & 1 != 0) },
                 None,
             );
         }
         0x3 => {
             //LSR (Logical Shift Right)
-            let result = rd_val >> (rs_val & 0x00FF);
+            let rs_val = rs_val & 0x00FF;
+            let result = rd_val >> rs_val;
             cpu.regs[rd] = result;
             cpu.cpsr.set_all_status_flags(
                 result,
-                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                if rs_val == 0 { None } else { Some((rd_val >> (rs_val - 1)) & 1 != 0) },
                 None,
             );
         }
         0x4 => {
             //ASR (Arithmetic Shift Right)
-            // TODO: Was the ASR just an i32 cast?
-            // TODO: GBATEK mentions SAR (Is that just the same thing?)
-            let result = ((rd_val as i32) << (rs_val & 0x00FF)) as u32;
+            let rs_val = rs_val & 0x00FF;
+            let result = ((rd_val as i32) << rs_val) as u32;
             cpu.regs[rd] = result;
             cpu.cpsr.set_all_status_flags(
                 result,
-                if rs_val == 0 { None } else { Some(unimplemented!("TODO: Carry")) },
+                if rs_val == 0 { None } else { Some((rd_val >> (rs_val - 1)) & 1 != 0) },
                 None,
             );
         }
@@ -182,7 +196,7 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
             cpu.regs[rd] = result;
             cpu.cpsr.set_all_status_flags(
                 result,
-                Some(unimplemented!("TODO: Carry")),
+                Some(carry_from(rd_val, rs_val, result)),
                 Some(overflow || overflow2),
             );
         }
@@ -193,15 +207,30 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
             cpu.regs[rd] = result;
             cpu.cpsr.set_all_status_flags(
                 result,
-                Some(unimplemented!("TODO: Carry")),
+                Some(borrow_from(rd_val, rs_val + ((!cpu.cpsr.C()) as u32), result)),
                 Some(overflow || overflow2),
             );
         }
         0x7 => {
             // ROR (Rotate Right)
-            let result = rd_val.rotate_right(rs_val);
-            cpu.regs[rd] = result;
-            cpu.cpsr.set_all_status_flags(result, Some(unimplemented!("TODO: Carry")), None);
+            let rs_val = rs_val & 0x00FF;
+            if rs_val == 0 {
+                cpu.cpsr.set_neutral_flags(rd_val);
+            } else {
+                let r4 = rs_val & 0x1F;
+                if r4 > 0 {
+                    let result = rd_val.rotate_right(r4);
+                    cpu.regs[rd] = result;
+                    cpu.cpsr.set_all_status_flags(
+                        result,
+                        Some(((rd_val >> (r4 - 1)) & 1) != 0),
+                        None,
+                    );
+                } else {
+                    cpu.cpsr.set_neutral_flags(rd_val);
+                    cpu.cpsr.set_C((rd_val >> 31) != 0);
+                }
+            }
         }
         0x8 => {
             // TST (Test)
@@ -209,14 +238,12 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
         }
         0x9 => {
             // NEG (Negate)
-            let result = !rs_val;
-            // TODO: Rd = 0 - Rs (Is this just binary not?)
+            let (result, overflow) = 0u32.overflowing_sub(rs_val);
             cpu.regs[rd] = result;
-            // cpu.regs[rd] = 0.overflowing_sub(rs_val).0;
             cpu.cpsr.set_all_status_flags(
                 result,
-                Some(unimplemented!("TODO: Carry")),
-                Some(unimplemented!("TODO: Overflow")),
+                Some(borrow_from(0, rs_val, result)),
+                Some(overflow),
             );
         }
         0xA => {
@@ -227,7 +254,11 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
         0xB => {
             // CMN (Compare Negative)
             let (res, overflow) = rd_val.overflowing_add(rs_val);
-            cpu.cpsr.set_all_status_flags(res, Some(unimplemented!()), Some(overflow));
+            cpu.cpsr.set_all_status_flags(
+                res,
+                Some(carry_from(rd_val, rs_val, res)),
+                Some(overflow),
+            );
         }
         0xC => {
             // ORR (Logical OR)
@@ -237,9 +268,10 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
         }
         0xD => {
             // MUL (Multiply)
-            let (res, _) = rd_val.overflowing_mul(rs_val);
+            let (res, overflow) = rd_val.overflowing_mul(rs_val);
             cpu.regs[rd] = res;
-            cpu.cpsr.set_all_status_flags(res, Some(unimplemented!()), None);
+            //TODO: Is overflow right there as carry?
+            cpu.cpsr.set_all_status_flags(res, Some(false), None);
         }
         0xE => {
             // BIC (Bit clear)
@@ -265,7 +297,6 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
     let operation = (opcode & 0x0300) >> 8;
     let rs = rs + ((msbs as usize) << 3);
     let rd = rd + ((msbd as usize) << 3);
-    //TODO: Only CMP affects CPSR condition flags!
     match operation {
         0 => {
             // ADD
@@ -276,19 +307,24 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
             //CMP
             let (op1, op2) = (cpu.regs[rd], cpu.regs[rs]);
             let (res, overflow) = op1.overflowing_sub(op2);
+            ///TODO: Is this check right?
             cpu.cpsr.set_all_status_flags(res, Some(op2 > op1), Some(overflow));
         }
         2 => {
             // MOV
-            cpu.regs[rd] = cpu.regs[rs];
+            cpu.regs[rd] = if rs == 15 { cpu.regs[15] + 2 } else { cpu.regs[rs] };
         }
         3 => {
             // Ignore BLX since it's ARMv9
             // BX
-            let rs_val = cpu.regs[rs];
-            cpu.regs[15] = rs_val;
             // Change to ARM mode if bit 0 is 0
+            let rs_val = cpu.regs[rs];
             cpu.cpsr.set_T((rs_val & 0x0000_0001) != 0);
+            if rs == 15 {
+                cpu.regs[15] = rs_val & 0xFFFF_FFFC;
+            } else {
+                cpu.regs[15] = rs_val & 0xFFFF_FFFE;
+            }
             return;
         }
         _ => unimplemented!("Impossible"), //std::hint::unreachable_unchecked()
@@ -300,7 +336,42 @@ fn pc_relative_load(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
     let byte = as_low_byte(opcode) as u32;
     let offset = byte << 2; // In steps of 4
-    cpu.regs[rd] = cpu.fetch_u32(cpu.regs[15] + offset);
+    dbg!("pc rel load");
+    dbg!(rd);
+    println!("{:x}", offset);
+    cpu.regs[rd] = cpu.fetch_u32(((cpu.regs[15] + 2) & 0xFFFFFFFC).overflowing_add(offset).0);
+    println!(
+        "thingy +2 {:x}",
+        cpu.fetch_u32(
+            ((cpu.regs[15] + 2) & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(0).0
+        )
+    );
+    println!(
+        "thingy +4 {:x}",
+        cpu.fetch_u32(
+            ((cpu.regs[15] + 4) & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(0).0
+        )
+    );
+    println!(
+        "-4 {:x}",
+        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(4).0)
+    );
+    println!(
+        "-2 {:x}",
+        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(2).0)
+    );
+    println!(
+        "0 {:x}",
+        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(0).0)
+    );
+    println!(
+        "+2 {:x}",
+        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(2).0)
+    );
+    println!(
+        "+4 {:x}",
+        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(4).0)
+    );
     cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR
@@ -438,7 +509,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
     let mut sp = cpu.regs[13];
     if is_pop_else_push {
         // TODO: Does this need reversing?
-        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
+        for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.regs[7 - idx] = cpu.fetch_u32(sp);
             sp = sp + 4;
         }
@@ -448,7 +519,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
         }
     } else {
         // TODO: Does this need reversing?
-        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
+        for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(sp, cpu.regs[7 - idx]);
             dbg!(7 - idx);
             sp = sp - 4;
@@ -470,12 +541,12 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
     let mut addr = cpu.regs[rb];
     // TODO: Should this be reversed?
     if is_load_else_store {
-        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
+        for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(addr, cpu.regs[7 - idx]);
             addr += 4;
         }
     } else {
-        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
+        for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.regs[7 - idx] = cpu.fetch_u32(addr);
             addr += 4;
         }
@@ -485,17 +556,25 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
 /// B{COND}
 fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
     let offset = (as_low_byte(opcode) as u32) << 1;
+    dbg!(offset);
+    println!("{:x}", offset);
     let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
+    dbg!(offset);
+    println!("{:x}", offset);
     let cond = (opcode << 4) & 0xF000;
     let should_not_jump = super::arm::check_cond(cpu, (cond as u32) << 16);
+    dbg!(should_not_jump);
+    dbg!(is_negative);
     if should_not_jump {
         cpu.clocks += 0; // TODO: clocks
         return;
     }
     cpu.regs[15] = if is_negative {
+        println!("{:x}", (!offset) & 0x0000_00FE);
         cpu.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
     } else {
-        cpu.regs[15].overflowing_add(offset).0
+        println!("{:x}", offset);
+        cpu.regs[15].overflowing_add(offset + 2).0
     };
     cpu.clocks += 0; // TODO: clocks
 }
@@ -506,11 +585,15 @@ fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
 }
 /// B
 fn branch(cpu: &mut Cpu, opcode: u16) {
-    let offset = (opcode & 0x01FF) as u32;
-    let offset = offset << 1;
+    dbg!("branch");
+    //let offset = (opcode & 0x01FF) as u32;
+    let offset = (as_low_11bits(opcode) as u32) << 1;
+    println!("{:x}", offset);
     let is_negative = (opcode & 0x0200) != 0;
-    let pc = *cpu.pc();
-    *cpu.pc() = if is_negative { pc - offset } else { pc + offset };
+    dbg!(is_negative);
+    let pc = (*cpu.pc()).overflowing_add(2).0;
+    *cpu.pc() =
+        if is_negative { pc.overflowing_sub(offset).0 } else { pc.overflowing_add(offset).0 };
     cpu.clocks += 0; // TODO: clocks
 }
 /// BL/BLX
@@ -520,7 +603,7 @@ fn branch(cpu: &mut Cpu, opcode: u16) {
 /// The first one has the upper 11 bits and the second the lower 11
 fn branch_and_link_or_link_and_exchange(cpu: &mut Cpu, opcode: u16) {
     //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
-    let upper_offset = (i32::from(((as_low_11bits(opcode) as i16) << 5)) << 7) as u32;
+    let upper_offset = (i32::from((as_low_11bits(opcode) as i16) << 5) << 7) as u32;
     let pc = cpu.regs[15];
     cpu.regs[14] = pc.overflowing_add(upper_offset).0.overflowing_add(2).0;
     let next_instruction = cpu.fetch_u16(pc);
@@ -536,7 +619,7 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
     const T: bool = true;
     const F: bool = false;
     match bits15_8.as_bools() {
-        [F, F, F, T, T, T, _, _] => add_or_sub,
+        [F, F, F, T, T, _, _, _] => add_or_sub, /* TODO: The ARM7TDMI manual says 0b000111 but GBATEK 0x00011 */
         [F, F, F, _, _, _, _, _] => move_shifted_register,
         [F, F, T, _, _, _, _, _] => immediate_operation,
         [F, T, F, F, F, F, _, _] => alu_operation,
@@ -555,7 +638,6 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
         [T, T, F, T, _, _, _, _] => conditional_branch,
         [T, T, T, F, F, _, _, _] => branch,
         [T, T, T, T, _, _, _, _] => branch_and_link_or_link_and_exchange,
-        //TODO: the rest
         _ => unimplemented!(),
     }
 }
