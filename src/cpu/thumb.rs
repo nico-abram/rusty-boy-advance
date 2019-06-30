@@ -438,9 +438,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
     let mut sp = cpu.regs[13];
     if is_pop_else_push {
         // TODO: Does this need reversing?
-        for (idx, _) in
-            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
-        {
+        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.regs[7 - idx] = cpu.fetch_u32(sp);
             sp = sp + 4;
         }
@@ -450,9 +448,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
         }
     } else {
         // TODO: Does this need reversing?
-        for (idx, _) in
-            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
-        {
+        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(sp, cpu.regs[7 - idx]);
             dbg!(7 - idx);
             sp = sp - 4;
@@ -474,16 +470,12 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
     let mut addr = cpu.regs[rb];
     // TODO: Should this be reversed?
     if is_load_else_store {
-        for (idx, _) in
-            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
-        {
+        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(addr, cpu.regs[7 - idx]);
             addr += 4;
         }
     } else {
-        for (idx, _) in
-            rlist.as_bools().into_iter().rev().enumerate().filter(|(idx, &boolean)| boolean)
-        {
+        for (idx, _) in rlist.as_bools().into_iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.regs[7 - idx] = cpu.fetch_u32(addr);
             addr += 4;
         }
@@ -528,12 +520,15 @@ fn branch(cpu: &mut Cpu, opcode: u16) {
 /// The first one has the upper 11 bits and the second the lower 11
 fn branch_and_link_or_link_and_exchange(cpu: &mut Cpu, opcode: u16) {
     //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
-    let upper_offset = as_low_11bits(opcode) as u32;
-    let pc = *cpu.pc();
+    let upper_offset = (i32::from(((as_low_11bits(opcode) as i16) << 5)) << 7) as u32;
+    let pc = cpu.regs[15];
+    cpu.regs[14] = pc.overflowing_add(upper_offset).0.overflowing_add(2).0;
     let next_instruction = cpu.fetch_u16(pc);
-    let lower_offset = as_low_11bits(next_instruction) as u32;
-    cpu.regs[14] = (pc + 2) | 1u32;
-    *cpu.pc() = pc + 2 + (lower_offset << 1) + (upper_offset << 12);
+    cpu.regs[15] += 2;
+    let lower_offset = u32::from(as_low_11bits(next_instruction) << 1);
+    let pc = cpu.regs[15] + 2;
+    cpu.regs[15] = cpu.regs[14] + lower_offset;
+    cpu.regs[14] = pc - 1;
     cpu.clocks += 0; // TODO: clocks
 }
 fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {

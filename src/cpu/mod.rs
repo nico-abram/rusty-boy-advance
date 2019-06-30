@@ -142,7 +142,7 @@ impl Cpu {
             0x0200_0000..=0x0203_FFFF => self.wram_board[addr - 0x0200_0000],
             //WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
             0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
-            0x0300_8000..=0x03FF_FFFF => self.wram_chip[addr - 0x0300_8000],
+            0x0300_8000..=0x03FF_FFFF => self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF],
             //I/O Registers             (1022 Bytes)
             0x0400_0000..=0x0400_03FE => self.wram_chip[000],
             //Internal Display Memory
@@ -180,7 +180,7 @@ impl Cpu {
                 self.wram_chip[addr - 0x0300_0000] = byte;
             }
             0x0300_8000..=0x03FF_FFFF => {
-                self.wram_chip[addr - 0x0300_8000] = byte;
+                self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF] = byte;
             }
             //I/O Registers             (1022 Bytes)
             0x0400_0000..=0x0400_03FE => {

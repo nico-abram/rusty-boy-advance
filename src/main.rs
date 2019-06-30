@@ -53,9 +53,9 @@ fn main() -> Result<(), String> {
         )
         .get_matches();
 
-    let frames_to_run = matches.value_of("frames").unwrap().parse::<u32>().unwrap_or(0u32);
+    let frames_to_run = matches.value_of("frames").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
     let instructions_to_run =
-        matches.value_of("instructions").unwrap().parse::<u32>().unwrap_or(0u32);
+        matches.value_of("instructions").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
     let rom_filename = matches.value_of("rom").unwrap();
     let headless = matches.is_present("headless");
 
