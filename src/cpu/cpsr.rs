@@ -8,7 +8,7 @@ fn is_set(x: u32, bit: u32) -> bool {
     (x & bit) == bit
 }
 impl CPSR {
-    pub(crate) fn to_string(&self) -> String {
+    pub(crate) fn to_string(self) -> String {
         format!(
             "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{} mode:{:x?}({:x?})",
             self.N(),
@@ -24,7 +24,7 @@ impl CPSR {
         )
     }
     #[inline]
-    fn is_set(&self, bit: u32) -> bool {
+    fn is_set(self, bit: u32) -> bool {
         is_set(self.0, bit)
     }
     #[inline]
@@ -33,7 +33,7 @@ impl CPSR {
     }
     /// Sign(Negative)
     #[inline]
-    pub(crate) fn N(&self) -> bool {
+    pub(crate) fn N(self) -> bool {
         self.is_set(0x8000_0000)
     }
     /// Sign(Negative)
@@ -43,7 +43,7 @@ impl CPSR {
     }
     /// Zero
     #[inline]
-    pub(crate) fn Z(&self) -> bool {
+    pub(crate) fn Z(self) -> bool {
         self.is_set(0x4000_0000)
     }
     /// Zero
@@ -53,7 +53,7 @@ impl CPSR {
     }
     /// Carry
     #[inline]
-    pub(crate) fn C(&self) -> bool {
+    pub(crate) fn C(self) -> bool {
         self.is_set(0x2000_0000)
     }
     /// Carry
@@ -63,7 +63,7 @@ impl CPSR {
     }
     /// Overflow
     #[inline]
-    pub(crate) fn V(&self) -> bool {
+    pub(crate) fn V(self) -> bool {
         self.is_set(0x1000_0000)
     }
     /// Overflow
@@ -73,7 +73,7 @@ impl CPSR {
     }
     /// Sticky overflow
     #[inline]
-    pub(crate) fn Q(&self) -> bool {
+    pub(crate) fn Q(self) -> bool {
         self.is_set(0x0800_0000)
     }
     // Sticky overflow
@@ -83,7 +83,7 @@ impl CPSR {
     }
     /// IRQ disabled
     #[inline]
-    pub(crate) fn I(&self) -> bool {
+    pub(crate) fn I(self) -> bool {
         self.is_set(0x0000_0080)
     }
     /// Disable IRQ
@@ -93,7 +93,7 @@ impl CPSR {
     }
     /// Fiq disabled
     #[inline]
-    pub(crate) fn F(&self) -> bool {
+    pub(crate) fn F(self) -> bool {
         self.is_set(0x0000_0040)
     }
     /// Disable Fiq
@@ -103,7 +103,7 @@ impl CPSR {
     }
     /// State/Thumb (thumb=1/true)
     #[inline]
-    pub(crate) fn T(&self) -> bool {
+    pub(crate) fn T(self) -> bool {
         self.is_set(0x0000_0020)
     }
     /// State/Thumb (thumb=1/true)
@@ -113,7 +113,7 @@ impl CPSR {
     }
     /// Get priviledge mode
     #[inline]
-    pub(crate) fn mode(&self) -> CpuMode {
+    pub(crate) fn mode(self) -> CpuMode {
         CpuMode::from_byte((self.0 & 0x0000_001F) as u8)
     }
     /// Set priviledge mode

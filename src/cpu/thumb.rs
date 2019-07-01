@@ -29,6 +29,7 @@ fn as_bits_6_to_10(opcode: u16) -> u16 {
 /// 3 bit values (0-7)
 /// Since these are often used as register numbers we return them as usizes
 #[inline]
+#[allow(clippy::identity_op)]
 fn as_lower_3bit_values(opcode: u16) -> (usize, usize, usize, usize) {
     (
         ((opcode & 0x0E00) >> 9) as usize,
@@ -307,7 +308,7 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
             //CMP
             let (op1, op2) = (cpu.regs[rd], cpu.regs[rs]);
             let (res, overflow) = op1.overflowing_sub(op2);
-            ///TODO: Is this check right?
+            // TODO: Is this check right?
             cpu.cpsr.set_all_status_flags(res, Some(op2 > op1), Some(overflow));
         }
         2 => {
@@ -334,64 +335,27 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
 /// LDR PC
 fn pc_relative_load(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let byte = as_low_byte(opcode) as u32;
+    let byte = u32::from(as_low_byte(opcode));
     let offset = byte << 2; // In steps of 4
-    dbg!("pc rel load");
-    dbg!(rd);
-    println!("{:x}", offset);
-    cpu.regs[rd] = cpu.fetch_u32(((cpu.regs[15] + 2) & 0xFFFFFFFC).overflowing_add(offset).0);
-    println!(
-        "thingy +2 {:x}",
-        cpu.fetch_u32(
-            ((cpu.regs[15] + 2) & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(0).0
-        )
-    );
-    println!(
-        "thingy +4 {:x}",
-        cpu.fetch_u32(
-            ((cpu.regs[15] + 4) & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(0).0
-        )
-    );
-    println!(
-        "-4 {:x}",
-        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(4).0)
-    );
-    println!(
-        "-2 {:x}",
-        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_sub(2).0)
-    );
-    println!(
-        "0 {:x}",
-        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(0).0)
-    );
-    println!(
-        "+2 {:x}",
-        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(2).0)
-    );
-    println!(
-        "+4 {:x}",
-        cpu.fetch_u32((cpu.regs[15] & 0xFFFFFFFC).overflowing_add(offset).0.overflowing_add(4).0)
-    );
+    cpu.regs[rd] = cpu.fetch_u32(((cpu.regs[15] + 2) & 0xFFFF_FFFC).overflowing_add(offset).0);
     cpu.clocks += 0; // TODO: clocks
 }
 /// LDR/STR
 fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
     let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
     let is_load = as_11th_bit(opcode);
-    let is_byte = (opcode & 0x0400) != 0; // else word(32bit)
+    let is_byte_else_word = (opcode & 0x0400) != 0;
     let (addr, _) = cpu.regs[ro].overflowing_add(cpu.regs[rb]);
-    println!("{:x}", addr);
-    println!("{:x}", cpu.regs[rb]);
-    println!("{:x}", cpu.regs[ro]);
     if is_load {
-        if is_byte {
+        if is_byte_else_word {
             // TODO: Does this zero extend the 32bit value?
             cpu.write_u8(addr, cpu.regs[rd] as u8);
         } else {
             cpu.write_u32(addr, cpu.regs[rd]);
         }
     } else {
-        cpu.regs[rd] = if is_byte { cpu.fetch_byte(addr) as u32 } else { cpu.fetch_u32(addr) };
+        cpu.regs[rd] =
+            if is_byte_else_word { cpu.fetch_byte(addr) as u32 } else { cpu.fetch_u32(addr) };
     }
     cpu.clocks += 0; // TODO: clocks
 }
@@ -409,12 +373,12 @@ fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
     cpu.regs[rd] = if H {
         // Half-word(16 bits)
         if sign_extend {
-            (cpu.fetch_u16(addr) as i16 as i32 as u32) // Sign extend
+            (i32::from(cpu.fetch_u16(addr) as i16) as u32) // Sign extend
         } else {
-            (cpu.fetch_u16(addr) as u32)
+            u32::from(cpu.fetch_u16(addr))
         }
     } else {
-        (cpu.fetch_byte(addr) as i8 as i32 as u32) // Sign extend
+        (i32::from(cpu.fetch_byte(addr) as i8) as u32) // Sign extend
     };
     cpu.clocks += 0; // TODO: clocks
 }
