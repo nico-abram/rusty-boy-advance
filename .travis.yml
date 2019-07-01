@@ -6,7 +6,28 @@ cache:
   - apt
   - homebrew
   - cargo
-
+matrix:
+  include:
+  - ARCH=x86_64
+    os: linux
+    deploy:
+      provider: pages
+      skip-cleanup: true
+      github-token: $GITHUB_TOKEN
+      keep-history: false
+      local-dir: public
+      on:
+        branch: master
+  - ARCH=i686
+    os: linux
+  - ARCH=x86_64
+    os: windows
+  - ARCH=i686
+    os: windows
+  - ARCH=x86_64
+    os: osx
+  - ARCH=i686
+    os: osx
 env:
   - ARCH=x86_64
   - ARCH=i686
@@ -43,13 +64,4 @@ before_deploy:
     fi
   - pwd
   - ls
-  - echo "<meta http-equiv=refresh content=0;url=doc/rgba/index.html>" > public/index.html
-  
-deploy:
-  provider: pages
-  skip-cleanup: true
-  github-token: $GITHUB_TOKEN
-  keep-history: false
-  local-dir: public
-  on:
-    branch: master
+  - echo "<meta h
