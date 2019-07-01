@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
-#![allow(unused_variables)]
 
 use super::{cpsr::CPSR, utils::AsBoolSlice, Cpu, CpuMode, SWI_HANDLER};
 
@@ -163,7 +162,7 @@ fn B(cpu: &mut Cpu, opcode: u32) {
 /// Software Interrupt
 ///
 /// Used to call BIOS functions
-pub(crate) fn SWI(cpu: &mut Cpu, opcode: u32) {
+pub(crate) fn SWI(cpu: &mut Cpu, _: u32) {
   cpu.set_mode(CpuMode::Supervisor);
   *cpu.pc() = SWI_HANDLER;
   cpu.cpsr.set_T(false); // Set ARM state
@@ -190,6 +189,7 @@ fn SWP(cpu: &mut Cpu, opcode: u32) {
 }
 /// Multiply long
 fn MULL(cpu: &mut Cpu, opcode: u32) {
+  //TODO: Accumulate?
   let (_, _, signed, accumulate, set_cond_flags) = as_flags(opcode);
   let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
   let res: u64 = if signed {
@@ -200,10 +200,11 @@ fn MULL(cpu: &mut Cpu, opcode: u32) {
   *cpu.reg_mut(rdhigh) = (res) as u32;
   *cpu.reg_mut(rdlow) = (res >> 32) as u32;
   if set_cond_flags {
+    // TODO: Are Z and N set using the 64bit value
+    // or just the upper word or lower word?
     cpu.cpsr.set_Z(res == 0);
-    cpu.cpsr.set_N((res & 0x8000_0000) != 0);
-    cpu.cpsr.set_V(false); //TODO
-    cpu.cpsr.set_C(false); //TODO
+    cpu.cpsr.set_N((res & 0x8000_0000_0000_0000) != 0);
+    cpu.cpsr.set_C(false); //C=destroyed (ARMv4 and below)
   }
   cpu.clocks += 0; // todo:clocks
 }
@@ -212,20 +213,20 @@ fn MUL(cpu: &mut Cpu, opcode: u32) {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
-    cpu.fetch_reg(rn) * cpu.fetch_reg(rm) + cpu.fetch_reg(rd)
+    cpu.fetch_reg(rn).overflowing_mul(cpu.fetch_reg(rm)).0.overflowing_add(cpu.fetch_reg(rd)).0
   } else {
-    cpu.fetch_reg(rn) * cpu.fetch_reg(rm)
+    cpu.fetch_reg(rn).overflowing_mul(cpu.fetch_reg(rm)).0
   };
   *cpu.reg_mut(rs) = res;
   if set_cond_flags {
-    cpu.cpsr.set_Z(res == 0);
-    cpu.cpsr.set_N((res & 0x8000_0000) != 0);
-    cpu.cpsr.set_V(false);
-    cpu.cpsr.set_C(false);
+    //C=destroyed (ARMv4 and below)
+    cpu.cpsr.set_all_status_flags(res, Some(false), None);
   }
   cpu.clocks += 0; // todo:clocks
 }
 /// Halfword Data Transfer Register Offset
+#[allow(unused_variables)]
+#[allow(clippy::many_single_char_names)]
 fn HDT_RO(cpu: &mut Cpu, opcode: u32) {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, _, sh, rm) = as_usize_nibbles(opcode);
@@ -236,6 +237,8 @@ fn HDT_RO(cpu: &mut Cpu, opcode: u32) {
   unimplemented!()
 }
 // Halfword Data Transfer Immediate Offset
+#[allow(unused_variables)]
+#[allow(clippy::many_single_char_names)]
 fn HDT_IO(cpu: &mut Cpu, opcode: u32) {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, offset, sh, rm) = as_usize_nibbles(opcode);
@@ -292,11 +295,28 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
   let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) = as_flags(opcode);
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
   let (_, rlist4, rlist3, rlist2, rlist1) = as_u8_nibbles(opcode);
-  println!("rlist1: {:x}", rlist1);
-  println!("rlist2: {:x}", rlist2);
   let rlists = [rlist1, rlist2, rlist3, rlist4];
-  // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
-  let mut sp = cpu.regs[13];
+  // TODO: Should that be (rlist1 & 0x1) ?
+  let is_psr = psr_or_user_mode && is_load_else_store && ((rlist4 & 0x8) != 0);
+  let get_mut_reg: fn(&mut Cpu, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
+    // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
+    // "You must not use it in User mode or System mode.". How strict is that requirement?
+    |cpu, x| match x {
+      0..=7 => &mut cpu.regs[x],
+      8..=12 => {
+        if cpu.cpsr.mode() == CpuMode::FIQ {
+          &mut cpu.fiq_only_banks[0][x - 8]
+        } else {
+          &mut cpu.regs[x]
+        }
+      }
+      13..=15 => &mut cpu.all_modes_banks[CpuMode::User.as_usize()][x - 13],
+      _ => unimplemented!("This should never happen"),
+    }
+  } else {
+    |cpu, x| &mut cpu.regs[x]
+  };
+  let mut sp = *get_mut_reg(cpu, rn);
   // TODO: Is this right or was it the other way around?
   // up & load => -
   // down & load => +
@@ -312,19 +332,21 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
         *sp += offset;
       }
     };
+  // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
   for (byte_number, byte) in rlists.iter().enumerate() {
     for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().skip(4).rev().enumerate() {
       if bit_is_set {
         let bit_number = byte_number * 4 + bit_in_byte;
-        // Pre//Post offsetting matters if we're storing the stack pointer(reg 13)
+        // Pre//Post offsetting matters if we're storing the base register
         if is_pre_offseted {
           operation(&mut sp, 4);
         }
         let reg_number = bit_number - 1;
         if is_load_else_store {
-          cpu.regs[reg_number] = cpu.fetch_u32(sp);
+          *get_mut_reg(cpu, reg_number) = cpu.fetch_u32(sp);
         } else {
-          cpu.write_u32(sp, cpu.regs[reg_number]);
+          let val = *get_mut_reg(cpu, reg_number);
+          cpu.write_u32(sp, val);
         }
         if !is_pre_offseted {
           operation(&mut sp, 4);
@@ -332,7 +354,14 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
       }
     }
   }
-  cpu.regs[13] = sp;
+  if write_back {
+    *get_mut_reg(cpu, rn) = sp;
+  }
+  if is_psr {
+    cpu.cpsr = *cpu
+      .get_spsr_mut()
+      .expect("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode");
+  }
   cpu.clocks += 0; // todo:clocks
 }
 /// Data Processing or PSR transfer
@@ -344,11 +373,11 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
   let set_condition_flags = (opcode & 0x0010_0000) != 0 || rd == 15;
   let mut rn = cpu.regs[rn_num];
   if rn_num == 15 {
-    rn += 4; // Account for PC pipelining
+    rn = rn.overflowing_add(4).0; // Account for PC pipelining
   }
   let operation = ((opcode & 0x01E0_0000) >> 21) as u8;
   let (op2, shift_carry) = if immediate {
-    let ror_shift = u32::from(third_byte) * 2;
+    let ror_shift = u32::from(third_byte) << 1;
     let val = u32::from(lowest_byte + second_byte * 16);
     (val.rotate_right(ror_shift), Some((val & (1u32 << ror_shift)) != 0))
   } else {
@@ -356,7 +385,9 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
     let shift_by_register = (opcode & 0x0000_0010) != 0;
     let mut imm_shift_zero = false;
     let shift_amount = if shift_by_register {
-      cpu.regs[third_byte as usize] & 0x0000_000F + if third_byte == 15 { 4 } else { 0 }
+      (cpu.regs[third_byte as usize] & 0x0000_000F)
+        .overflowing_add(if third_byte == 15 { 4 } else { 0 })
+        .0
     } else {
       let shift_amount = (opcode & 0x0000_0F80) >> 7;
       imm_shift_zero = shift_amount == 0;
@@ -579,15 +610,15 @@ fn MRS(cpu: &mut Cpu, opcode: u32) {
     if use_spsr { cpu.get_spsr_mut().unwrap().0 } else { cpu.cpsr.0 };
 }
 /// Coprocessor Data Transfer (Unimplemented)
-fn CDT(cpu: &mut Cpu, opcode: u32) {
+fn CDT(_: &mut Cpu, _: u32) {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Data Operation (Unimplemented)
-fn CDO(cpu: &mut Cpu, opcode: u32) {
+fn CDO(_: &mut Cpu, _: u32) {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Register Transfer (Unimplemented)
-fn CRT(cpu: &mut Cpu, opcode: u32) {
+fn CRT(_: &mut Cpu, _: u32) {
   unimplemented!("Coprocessor instructions are not supported")
 }
 

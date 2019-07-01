@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
-#![allow(unused_variables)]
 
 use super::{utils::AsBoolSlice, Cpu};
 
@@ -9,7 +8,7 @@ use super::{utils::AsBoolSlice, Cpu};
 fn as_11th_bit(opcode: u16) -> bool {
   (opcode & 0x0800) != 0
 }
-/// 11 bit value (0-1023)
+/// 11 bit value (0-1023)  
 #[inline]
 fn as_low_11bits(opcode: u16) -> u16 {
   opcode & 0x07FF
@@ -45,6 +44,18 @@ fn as_low_byte(opcode: u16) -> u8 {
 #[inline]
 fn as_bits_11_and_12(opcode: u16) -> u16 {
   (opcode >> 11) & 0x3
+}
+#[inline]
+fn carry_from(op1: u32, op2: u32, result: u32) -> bool {
+  ((op1 >> 31) + (op2 >> 31)) > (result >> 31)
+}
+#[inline]
+fn borrow_from(positive: u32, negative: u32, _: u32) -> bool {
+  positive >= negative
+}
+#[inline]
+fn sign_flag(N: u32) -> bool {
+  (N >> 31) == 1
 }
 
 fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
@@ -124,15 +135,6 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     _ => unimplemented!(), //std::hint::unreachable_unchecked()
   };
   cpu.clocks += 0; // TODO: clocks
-}
-fn carry_from(op1: u32, op2: u32, result: u32) -> bool {
-  ((op1 >> 31) + (op2 >> 31)) > (result >> 31)
-}
-fn borrow_from(positive: u32, negative: u32, result: u32) -> bool {
-  positive >= negative
-}
-fn sign_flag(N: u32) -> bool {
-  (N >> 31) == 1
 }
 fn alu_operation(cpu: &mut Cpu, opcode: u16) {
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
@@ -251,9 +253,8 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
     }
     0xD => {
       // MUL (Multiply)
-      let (res, overflow) = rd_val.overflowing_mul(rs_val);
+      let res = rd_val.overflowing_mul(rs_val).0;
       cpu.regs[rd] = res;
-      //TODO: Is overflow right there as carry?
       cpu.cpsr.set_all_status_flags(res, Some(false), None);
     }
     0xE => {
@@ -451,7 +452,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
   let mut sp = cpu.regs[13];
   if is_pop_else_push {
     // TODO: Does this need reversing?
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
       cpu.regs[7 - idx] = cpu.fetch_u32(sp);
       sp += 4;
     }
@@ -461,7 +462,7 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
     }
   } else {
     // TODO: Does this need reversing?
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
       cpu.write_u32(sp, cpu.regs[7 - idx]);
       sp -= 4;
     }
@@ -481,12 +482,12 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
   let mut addr = cpu.regs[rb];
   // TODO: Should this be reversed?
   if is_load_else_store {
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
       cpu.write_u32(addr, cpu.regs[7 - idx]);
       addr += 4;
     }
   } else {
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
       cpu.regs[7 - idx] = cpu.fetch_u32(addr);
       addr += 4;
     }
@@ -585,7 +586,7 @@ mod tests {
 
   extern crate test;
   use test::Bencher;
-  fn none(cpu: &mut Cpu, x: u16) {}
+  fn none(_: &mut Cpu, _: u16) {}
   fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
     let bits15_8 = (opcode >> 8) as u8;
     const T: bool = true;

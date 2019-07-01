@@ -1,7 +1,6 @@
 #![feature(box_syntax)]
 #![feature(test)]
 #![allow(dead_code)]
-#![allow(unused_variables)]
 
 use clap::{App, Arg};
 
