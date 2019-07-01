@@ -53,4 +53,4 @@ before_deploy:
   - cp -r target/doc public/
   - pwd
   - ls
-  - echo "<meta h
+  - echo "<meta http-equiv=refresh content=0;url=doc/rgba/index.html>" > public/index.html
