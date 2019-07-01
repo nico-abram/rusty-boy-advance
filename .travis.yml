@@ -39,7 +39,7 @@ before_deploy:
   - mkdir public
   - cp -r target/doc public/
   - if [ $TRAVIS_OS_NAME == "windows" ]; then
-      cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public;
+      cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public.;
     fi
   - pwd
   - ls
