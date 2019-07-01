@@ -6,15 +6,28 @@ cache:
   - apt
   - homebrew
   - cargo
-
-env:
-  - ARCH=x86_64
-  - ARCH=i686
-
-os:
-  - linux
-  - osx
-  - windows
+matrix:
+  include:
+  - env: ARCH=x86_64
+    os: linux
+    deploy:
+    - provider: pages
+      skip-cleanup: true
+      github-token: $GITHUB_TOKEN
+      keep-history: false
+      local-dir: public
+      on:
+        branch: master
+  - env: ARCH=i686
+    os: linux
+  - env: ARCH=x86_64
+    os: windows
+  - env: ARCH=i686
+    os: windows
+  - env: ARCH=x86_64
+    os: osx
+  - env: ARCH=i686
+    os: osx
 
 addons:
   apt:
@@ -26,6 +39,7 @@ addons:
     - libegl1-mesa-dev
     - libgles2-mesa-dev
   homebrew:
+    update: true
     packages:
     - sdl2
     - sdl2-image
@@ -37,18 +51,6 @@ before_deploy:
   - cargo doc --document-private-items --no-deps
   - mkdir public
   - cp -r target/doc public/
-  - if [ $TRAVIS_OS_NAME == "windows" ]; then
-      cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public;
-    fi
   - pwd
   - ls
   - echo "<meta http-equiv=refresh content=0;url=doc/rgba/index.html>" > public/index.html
-  
-deploy:
-  provider: pages
-  skip-cleanup: true
-  github-token: $GITHUB_TOKEN
-  keep-history: false
-  local-dir: public
-  on:
-    branch: master
