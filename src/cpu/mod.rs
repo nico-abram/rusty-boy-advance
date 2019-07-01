@@ -272,8 +272,9 @@ impl Cpu {
     pub fn state_as_string(&mut self) -> String {
         let pc = *self.pc();
         format!(
-            "Registers: {:x?}\n PC:{:x} {}",
-            self.regs.iter().enumerate().collect::<Vec<_>>(),
+            "Registers: \n{:x?}\n PC:{:x} {}",
+            //self.regs.iter().enumerate().collect::<Vec<_>>(), // TODO: Fix my vscode terminal not line wrapping ??????
+            self.regs,
             pc,
             self.cpsr.to_string()
         )

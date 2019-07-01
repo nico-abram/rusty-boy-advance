@@ -17,10 +17,12 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
         WindowFlags::default(),
     )?;
     let renderer = unsafe {
-        window.try_into_renderer(
-            None,
-            RendererFlags::default().with_accelerated(true).with_present_vsync(true),
-        ).map_err(|(_win, msg)| msg)?
+        window
+            .try_into_renderer(
+                None,
+                RendererFlags::default().with_accelerated(true).with_present_vsync(true),
+            )
+            .map_err(|(_win, msg)| msg)?
     };
     let beginning_of_time = std::time::Instant::now();
     'game_loop: loop {

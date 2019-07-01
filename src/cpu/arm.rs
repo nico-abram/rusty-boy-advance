@@ -293,39 +293,48 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
     let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) =
         as_flags(opcode);
     let (rn, _, _, _, _) = as_usize_nibbles(opcode);
-    let (_, _, _, rlist2, rlist1) = as_u8_nibbles(opcode);
-    let (rlist2, rlist1) = (rlist1.as_bools(), rlist2.as_bools());
-    let rlist_iter = rlist1.iter().chain(rlist2.iter()).enumerate();
+    let (_, rlist4, rlist3, rlist2, rlist1) = as_u8_nibbles(opcode);
+    println!("rlist1: {:x}", rlist1);
+    println!("rlist2: {:x}", rlist2);
+    let rlists = [rlist1, rlist2, rlist3, rlist4];
+    // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
     let mut sp = cpu.regs[13];
     // TODO: Is this right or was it the other way around?
-    // up & load => +
-    // down & load => -
-    // up & store => -
-    // down & store => +
+    // up & load => -
+    // down & load => +
+    // up & store => +
+    // down & store => -
     let operation: fn(&mut u32, u32) =
         if (is_up && is_load_else_store) || !(is_up || is_load_else_store) {
             |sp, offset| {
-                *sp += offset;
+                *sp -= offset;
             }
         } else {
             |sp, offset| {
-                *sp -= offset;
+                *sp += offset;
             }
         };
-    for (idx, _) in rlist_iter.filter(|(idx, &boolean)| boolean) {
-        // Pre offsetting matters if we're storing the stack pointer(reg 13)
-        if is_pre_offseted {
-            sp += 4;
-        }
-        if is_load_else_store {
-            cpu.regs[15 - idx] = cpu.fetch_u32(sp);
-        } else {
-            cpu.write_u32(sp, cpu.regs[15 - idx]);
-        }
-        if !is_pre_offseted {
-            sp += 4;
+    for (byte_number, byte) in rlists.iter().enumerate() {
+        for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().skip(4).rev().enumerate() {
+            if bit_is_set {
+                let bit_number = byte_number * 4 + bit_in_byte;
+                // Pre//Post offsetting matters if we're storing the stack pointer(reg 13)
+                if is_pre_offseted {
+                    operation(&mut sp, 4);
+                }
+                let reg_number = bit_number - 1;
+                if is_load_else_store {
+                    cpu.regs[reg_number] = cpu.fetch_u32(sp);
+                } else {
+                    cpu.write_u32(sp, cpu.regs[reg_number]);
+                }
+                if !is_pre_offseted {
+                    operation(&mut sp, 4);
+                }
+            }
         }
     }
+    cpu.regs[13] = sp;
     cpu.clocks += 0; // todo:clocks
 }
 /// Data Processing or PSR transfer
@@ -349,13 +358,14 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
         let shift_by_register = (opcode & 0x0000_0010) != 0;
         let mut imm_shift_zero = false;
         let shift_amount = if shift_by_register {
-            cpu.regs[third_byte as usize] & 0x0000_000F
+            cpu.regs[third_byte as usize] & 0x0000_000F + if third_byte == 15 { 4 } else { 0 }
         } else {
             let shift_amount = (opcode & 0x0000_0F80) >> 7;
             imm_shift_zero = shift_amount == 0;
             shift_amount
         };
         let shift_type = ((opcode & 0x0000_0060) >> 5) as u8;
+        dbg!(shift_type);
         let (op2, shift_carry) = if imm_shift_zero {
             // Handle special shift by 0 case
             match shift_type {
@@ -373,25 +383,35 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
             match shift_type {
                 0 => (
                     register_value.overflowing_shl(shift_amount).0,
-                    Some(
-                        (register_value & (1 << std::cmp::max(shift_amount - 1, 0))) != 0
-                            || shift_amount == 0,
-                    ),
+                    if shift_amount == 0 {
+                        None
+                    } else {
+                        Some(((register_value >> (32 - shift_amount)) & 1) != 0)
+                    },
                 ),
                 1 => (
                     register_value.overflowing_shr(shift_amount).0,
-                    Some(
-                        (register_value & (0x8000_0000 >> std::cmp::max(shift_amount - 1, 0))) != 0
-                            || shift_amount == 0,
-                    ),
+                    if shift_amount != 0 {
+                        Some(((register_value >> (shift_amount - 1)) & 1) != 0)
+                    } else {
+                        None
+                    },
                 ),
-                2 => ((register_value as i32).overflowing_shr(shift_amount).0 as u32, Some(false)),
+                2 => (
+                    (register_value as i32).overflowing_shr(shift_amount).0 as u32,
+                    if shift_amount != 0 {
+                        Some(((register_value >> (std::cmp::max(shift_amount, 32) - 1)) & 1) != 0)
+                    } else {
+                        None
+                    },
+                ),
                 3 => (
                     register_value.rotate_right(shift_amount),
-                    Some(
-                        (register_value & (1 << std::cmp::max(shift_amount - 1, 0))) != 0
-                            || shift_amount == 0,
-                    ),
+                    if shift_amount != 0 {
+                        Some(((register_value >> (shift_amount - 1)) & 1) != 0)
+                    } else {
+                        None
+                    },
                 ),
                 _ => unimplemented!("Impossible"),
             }
