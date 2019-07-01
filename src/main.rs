@@ -6,13 +6,13 @@
 use clap::{App, Arg};
 
 mod cpu;
-mod renderer;
+mod renderer_beryllium;
 
 #[allow(clippy::expect_fun_call)]
 fn main() -> Result<(), String> {
     let matches = App::new("RGBA")
         .version("0.0")
-        .author("Niko12")
+        .author("Nick12")
         .about("GBA emulator in rust")
         .arg(
             Arg::with_name("rom")
@@ -78,7 +78,7 @@ fn main() -> Result<(), String> {
             cpu.run_forever();
         }
     } else {
-        renderer::run(&mut cpu, frames_to_run).unwrap();
+        renderer_beryllium::run(&mut cpu, frames_to_run).unwrap();
     }
     Ok(())
 }
