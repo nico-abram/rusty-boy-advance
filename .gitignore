@@ -1,2 +1,6 @@
 /target
 **/*.rs.bk
+/.vscode
+
+*.gba
+*.sav
