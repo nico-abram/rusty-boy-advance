@@ -1,4 +1,3 @@
-#![feature(test)]
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
@@ -95,7 +94,7 @@ fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
 /// Move, compare, add and substract immediate
 fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
-    let offset = as_low_byte(opcode) as u32;
+    let offset = u32::from(as_low_byte(opcode));
     let operation = as_bits_11_and_12(opcode);
     println!("{:x}", opcode);
     println!("{:x}", operation);
@@ -355,7 +354,7 @@ fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
         }
     } else {
         cpu.regs[rd] =
-            if is_byte_else_word { cpu.fetch_byte(addr) as u32 } else { cpu.fetch_u32(addr) };
+            if is_byte_else_word { u32::from(cpu.fetch_byte(addr)) } else { cpu.fetch_u32(addr) };
     }
     cpu.clocks += 0; // TODO: clocks
 }
@@ -387,12 +386,12 @@ fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) {
     let is_byte_else_word = (opcode & 0x1000) != 0;
     let is_load_else_store = as_11th_bit(opcode);
     let (_, _, rb, rd) = as_lower_3bit_values(opcode);
-    let offset = as_bits_6_to_10(opcode) as u32;
+    let offset = u32::from(as_bits_6_to_10(opcode));
     let rb_val = cpu.regs[rb];
     if is_byte_else_word {
         let addr = offset + rb_val;
         if is_load_else_store {
-            cpu.regs[rd] = cpu.fetch_byte(addr) as u32;
+            cpu.regs[rd] = u32::from(cpu.fetch_byte(addr));
         } else {
             cpu.write_u8(addr, cpu.regs[rd] as u8);
         }
@@ -412,10 +411,10 @@ fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
     let is_load_else_store = as_11th_bit(opcode);
     let (_, _, rb, rd) = as_lower_3bit_values(opcode);
     let offset = as_bits_6_to_10(opcode);
-    let offset = (offset as u32) << 1;
+    let offset = u32::from(offset) << 1;
     let addr = offset + cpu.regs[rb];
     if is_load_else_store {
-        cpu.regs[rd] = cpu.fetch_u16(addr) as u32;
+        cpu.regs[rd] = u32::from(cpu.fetch_u16(addr));
     } else {
         cpu.write_u16(addr, cpu.regs[rd] as u16);
     }
@@ -425,7 +424,7 @@ fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
 fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) {
     let is_load_else_store = as_11th_bit(opcode);
     let byte = as_low_byte(opcode);
-    let offset = (byte as u32) << 2;
+    let offset = u32::from(byte) << 2;
     let rd = as_bits_8_to_10(opcode);
     let addr = cpu.regs[13] + offset;
     if is_load_else_store {
@@ -439,7 +438,7 @@ fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) {
 fn load_address(cpu: &mut Cpu, opcode: u16) {
     let load_sp_else_pc = as_11th_bit(opcode);
     let byte = as_low_byte(opcode);
-    let nn = (byte as u32) << 2;
+    let nn = u32::from(byte) << 2;
     let rd = as_bits_8_to_10(opcode);
     cpu.regs[rd] = if load_sp_else_pc {
         cpu.regs[13] + nn
@@ -454,7 +453,7 @@ fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
     let byte = as_low_byte(opcode);
     let substract_else_add = (byte & 0x80) != 0;
     let byte7 = byte & 0x0000_007F;
-    let offset = (byte7 as u32) << 2;
+    let offset = u32::from(byte7) << 2;
     dbg!(offset);
     let sp = cpu.regs[13];
     cpu.regs[13] = if substract_else_add {
@@ -475,23 +474,23 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
         // TODO: Does this need reversing?
         for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.regs[7 - idx] = cpu.fetch_u32(sp);
-            sp = sp + 4;
+            sp += 4;
         }
         if pc_or_lr_flag {
             cpu.regs[15] = cpu.fetch_u32(sp); // POP PC
-            sp = sp + 4;
+            sp += 4;
         }
     } else {
         // TODO: Does this need reversing?
         for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(sp, cpu.regs[7 - idx]);
             dbg!(7 - idx);
-            sp = sp - 4;
+            sp -= 4;
         }
         if pc_or_lr_flag {
             dbg!("LR");
             cpu.write_u32(sp, cpu.regs[14]); // PUSH LR
-            sp = sp - 4;
+            sp -= 4;
         }
     }
     cpu.regs[13] = sp;
@@ -519,14 +518,14 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
 }
 /// B{COND}
 fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
-    let offset = (as_low_byte(opcode) as u32) << 1;
+    let offset = u32::from(as_low_byte(opcode)) << 1;
     dbg!(offset);
     println!("{:x}", offset);
     let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
     dbg!(offset);
     println!("{:x}", offset);
     let cond = (opcode << 4) & 0xF000;
-    let should_not_jump = super::arm::check_cond(cpu, (cond as u32) << 16);
+    let should_not_jump = super::arm::check_cond(cpu, u32::from(cond) << 16);
     dbg!(should_not_jump);
     dbg!(is_negative);
     if should_not_jump {
@@ -544,14 +543,14 @@ fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
 }
 /// SWI
 fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
-    super::arm::SWI(cpu, (opcode as u32) << 16);
+    super::arm::SWI(cpu, u32::from(opcode) << 16);
     cpu.clocks += 0; // TODO: clocks
 }
 /// B
 fn branch(cpu: &mut Cpu, opcode: u16) {
     dbg!("branch");
     //let offset = (opcode & 0x01FF) as u32;
-    let offset = (as_low_11bits(opcode) as u32) << 1;
+    let offset = u32::from(as_low_11bits(opcode)) << 1;
     println!("{:x}", offset);
     let is_negative = (opcode & 0x0200) != 0;
     dbg!(is_negative);
@@ -615,11 +614,12 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
     instruction(cpu, opcode);
 }
 
-extern crate test;
 #[cfg(test)]
 mod tests {
     use super::AsBoolSlice;
     use super::*;
+
+    extern crate test;
     use test::Bencher;
     fn none(cpu: &mut Cpu, x: u16) {}
     fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
@@ -649,51 +649,52 @@ mod tests {
             _ => none,
         }
     }
+    #[allow(clippy::identity_op)]
     fn decode_thumb_raw(opcode: u16) -> fn(&mut Cpu, u16) -> () {
         let bits15_8 = (opcode >> 8) as u8;
         const T: bool = true;
         const F: bool = false;
         match bits15_8 {
-            x if (x & 0b11111100) == 0b00011100 => add_or_sub,
-            x if (x & 0b11100000) == 0b00000000 => move_shifted_register,
-            x if (x & 0b11100000) == 0b00100000 => immediate_operation,
-            x if (x & 0b11111100) == 0b01000000 => alu_operation,
-            x if (x & 0b11111100) == 0b01000100 => high_register_operations_or_bx,
-            x if (x & 0b11111000) == 0b01001000 => pc_relative_load,
-            x if (x & 0b11110010) == 0b01010000 => load_or_store_with_relative_offset,
-            x if (x & 0b11110010) == 0b01010010 => load_or_store_sign_extended_byte_or_halfword,
-            x if (x & 0b11100000) == 0b01100000 => load_or_store_with_immediate_offset,
-            x if (x & 0b11110000) == 0b10000000 => load_or_store_halfword,
-            x if (x & 0b11110000) == 0b10010000 => stack_pointer_relative_load_or_store,
-            x if (x & 0b11110000) == 0b10100000 => load_address,
-            x if (x & 0b11111111) == 0b10110000 => add_or_sub_offset_to_stack_pointer,
-            x if (x & 0b10110110) == 0b10110100 => push_or_pop,
-            x if (x & 0b11110000) == 0b11000000 => multiple_loads_or_stores,
-            x if (x & 0b11111111) == 0b1101111 => software_interrupt,
-            x if (x & 0b11110000) == 0b11010000 => conditional_branch,
-            x if (x & 0b11111000) == 0b11100000 => branch,
-            x if (x & 0b11110000) == 0b11110000 => branch_and_link_or_link_and_exchange,
+            x if (x & 0b1111_1100) == 0b0001_1100 => add_or_sub,
+            x if (x & 0b1110_0000) == 0b0000_0000 => move_shifted_register,
+            x if (x & 0b1110_0000) == 0b0010_0000 => immediate_operation,
+            x if (x & 0b1111_1100) == 0b0100_0000 => alu_operation,
+            x if (x & 0b1111_1100) == 0b0100_0100 => high_register_operations_or_bx,
+            x if (x & 0b1111_1000) == 0b0100_1000 => pc_relative_load,
+            x if (x & 0b1111_0010) == 0b0101_0000 => load_or_store_with_relative_offset,
+            x if (x & 0b1111_0010) == 0b0101_0010 => load_or_store_sign_extended_byte_or_halfword,
+            x if (x & 0b1110_0000) == 0b0110_0000 => load_or_store_with_immediate_offset,
+            x if (x & 0b1111_0000) == 0b1000_0000 => load_or_store_halfword,
+            x if (x & 0b1111_0000) == 0b1001_0000 => stack_pointer_relative_load_or_store,
+            x if (x & 0b1111_0000) == 0b1010_0000 => load_address,
+            x if (x & 0b1111_1111) == 0b1011_0000 => add_or_sub_offset_to_stack_pointer,
+            x if (x & 0b1011_0110) == 0b1011_0100 => push_or_pop,
+            x if (x & 0b1111_0000) == 0b1100_0000 => multiple_loads_or_stores,
+            x if (x & 0b1111_1111) == 0b0110_1111 => software_interrupt,
+            x if (x & 0b1111_0000) == 0b1101_0000 => conditional_branch,
+            x if (x & 0b1111_1000) == 0b1110_0000 => branch,
+            x if (x & 0b1111_0000) == 0b1111_0000 => branch_and_link_or_link_and_exchange,
             _ => none,
         }
     }
     #[bench]
     fn bench_decode_thumb(b: &mut Bencher) {
-        test::black_box(b.iter(|| {
-            test::black_box((0..100000u32).fold(0u32, |old, x| {
+        b.iter(|| {
+            test::black_box((0..100_000u32).fold(0u32, |old, x| {
                 test::black_box(old);
                 test::black_box(decode_thumb(x as u16));
                 0u32
             }))
-        }));
+        });
     }
     #[bench]
     fn bench_decode_thumb_raw(b: &mut Bencher) {
-        test::black_box(b.iter(|| {
-            test::black_box((0..100000u32).fold(0u32, |old, x| {
+        b.iter(|| {
+            test::black_box((0..100_000u32).fold(0u32, |old, x| {
                 test::black_box(old);
                 test::black_box(decode_thumb_raw(x as u16));
                 0u32
             }))
-        }));
+        });
     }
 }

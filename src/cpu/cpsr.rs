@@ -119,7 +119,7 @@ impl CPSR {
     /// Set priviledge mode
     #[inline]
     pub(crate) fn set_mode(&mut self, new_mode: CpuMode) {
-        self.0 = (self.0 & 0xFFFF_FFE0) | (new_mode.as_byte() as u32);
+        self.0 = (self.0 & 0xFFFF_FFE0) | u32::from(new_mode.as_byte());
     }
 
     #[inline]

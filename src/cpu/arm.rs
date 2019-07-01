@@ -7,13 +7,6 @@ use super::cpsr::CPSR;
 use super::utils::AsBoolSlice;
 use super::{Cpu, CpuMode, SWI_HANDLER};
 
-/// Print debug value as hex
-macro_rules! dbgx {
-    ($val:expr) => {
-        dbg!(format!("{:x?}", $val))
-    };
-}
-
 pub(crate) enum Cond {
     /// Equal (Z)
     EQ,
@@ -535,7 +528,7 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
         let invalid_bits_mask = !valid_bits_mask;
         cpu.cpsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
         if current_mode != CpuMode::User && change_control_fields {
-            cpu.set_mode(CpuMode::from_byte(((operand & 0x0000000F) | 0x00000010) as u8));
+            cpu.set_mode(CpuMode::from_byte(((operand & 0x0000_000F) | 0x0000_0010) as u8));
             cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
         }
     };
