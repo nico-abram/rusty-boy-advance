@@ -51,9 +51,6 @@ before_deploy:
   - cargo doc --document-private-items --no-deps
   - mkdir public
   - cp -r target/doc public/
-  - if [ $TRAVIS_OS_NAME == "windows" ]; then
-      cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public.;
-      fi;
   - pwd
   - ls
-- echo "<meta h
+  - echo "<meta h
