@@ -11,7 +11,7 @@ matrix:
   - env: ARCH=x86_64
     os: linux
     deploy:
-      provider: pages
+    - provider: pages
       skip-cleanup: true
       github-token: $GITHUB_TOKEN
       keep-history: false
@@ -28,14 +28,6 @@ matrix:
     os: osx
   - env: ARCH=i686
     os: osx
-env:
-  - ARCH=x86_64
-  - ARCH=i686
-
-os:
-  - linux
-  - osx
-  - windows
 
 addons:
   apt:
@@ -61,7 +53,7 @@ before_deploy:
   - cp -r target/doc public/
   - if [ $TRAVIS_OS_NAME == "windows" ]; then
       cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public.;
-    fi
+      fi;
   - pwd
   - ls
 - echo "<meta h
