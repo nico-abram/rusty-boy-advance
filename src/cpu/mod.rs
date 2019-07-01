@@ -155,11 +155,7 @@ impl Cpu {
             0x0A00_0000..=0x0BFF_FFFF => self.game_pak[addr - 0x0A00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
             0x0C00_0000..=0x0DFF_FFFF => self.game_pak[addr - 0x0C00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
             0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr - 0x0E00_0000], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-            _ => {
-                unimplemented!();
-                println!("Invalid address: {}", addr);
-                0u8
-            }
+            _ => unimplemented!("Invalid address: {:x}", addr),
         }
     }
     /// The GBA cpu always runs in LE mode
@@ -210,10 +206,7 @@ impl Cpu {
             0x0E00_0000..=0x0E00_FFFF => {
                 self.game_pak[addr - 0x0E00_0000] = byte;
             } /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-            _ => {
-                unimplemented!();
-                println!("Invalid address: {}", addr)
-            }
+            _ => unimplemented!("Invalid address: {:x}", addr),
         }
     }
     pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
@@ -231,7 +224,7 @@ impl Cpu {
         u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8)
     }
     pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
-        self.fetch_u16(addr) as u32 + ((self.fetch_u16(addr + 2) as u32) << 16)
+        u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16)
     }
     pub fn reset(&mut self) {
         self.regs = [0; 16];
@@ -240,8 +233,8 @@ impl Cpu {
         self.fiq_only_banks = [[0u32; 5]; 2];
         self.all_modes_banks = [[0u32; 2]; 6];
         self.spsrs = [CPSR(0x0000_0000F); 5];
-        self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x3007fa0;
-        self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x3007fe0;
+        self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x0300_7FA0;
+        self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x0300_7FE0;
         self.cpsr = CPSR(0x0000_001F);
         self.set_mode(CpuMode::Privileged);
         self.wram_board = [0u8; 256 * KB];
@@ -251,7 +244,7 @@ impl Cpu {
         self.oam = [0u8; KB];
         self.game_pak = [0u8; 64 * KB];
         self.clocks = 0u32;
-        self.regs[13] = 50364160; // Taken from mrgba
+        self.regs[13] = 0x0300_7F00; // Taken from mrgba
     }
     /// Load a ROM from a reader
     pub fn load<T: std::io::Read>(&mut self, mut reader: T) {

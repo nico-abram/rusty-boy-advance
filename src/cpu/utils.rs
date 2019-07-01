@@ -1,4 +1,3 @@
-#![feature(test)]
 /// Utility impl on u8's for some kind of "bit pattern matching".
 ///
 /// Consider performance implications (If any) later.
@@ -51,11 +50,11 @@ impl AsBoolSlice for u8 {
   }
 }
 
-extern crate test;
 #[cfg(test)]
 mod tests {
   use super::AsBoolSlice;
-  use super::*;
+
+  extern crate test;
   use test::Bencher;
   fn weird_bit_math(x: u8) -> u8 {
     const T: bool = true;
@@ -82,13 +81,13 @@ mod tests {
   #[bench]
   fn bench_add_two(b: &mut Bencher) {
     b.iter(|| {
-      (0..100000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math(new as u8)).0)
+      (0..100_000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math(new as u8)).0)
     });
   }
   #[bench]
   fn bench_add_two_raw(b: &mut Bencher) {
     b.iter(|| {
-      (0..100000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math_raw(new as u8)).0)
+      (0..100_000u32).fold(0u8, |old, new| old.overflowing_add(weird_bit_math_raw(new as u8)).0)
     });
   }
 }

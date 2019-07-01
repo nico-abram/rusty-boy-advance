@@ -15,7 +15,7 @@ impl CpuMode {
     /// Returns a number in the 0-5 range. Both User and Priviledged(Systen) use 0.
     ///
     /// Used to index the array of register banks.
-    pub(crate) fn as_usize(&self) -> usize {
+    pub(crate) fn as_usize(self) -> usize {
         match self {
             CpuMode::User => 0,
             CpuMode::Privileged => 0,
@@ -41,7 +41,7 @@ impl CpuMode {
     /// 0b11011 0x1B 27 - Undefined (Undefined instruction handler)
     ///
     /// 0b11111 0x1F 31 - System (privileged 'User' mode) (ARMv4 and up)
-    pub(crate) fn as_byte(&self) -> u8 {
+    pub(crate) fn as_byte(self) -> u8 {
         match self {
             CpuMode::User => 0b10000,
             CpuMode::FIQ => 0b10001,

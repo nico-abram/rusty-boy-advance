@@ -73,8 +73,8 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
                     for y in 0usize..160usize {
                         // Note: pitch values are provided **in bytes**, so cast to the pixel
                         // type after you offset to the start of the target row.
-                        let row_ptr = ptr.offset((y * pitch) as isize) as *mut u32;
-                        row_ptr.offset(x as isize).write(cpu.output_texture[x * 160 + y]);
+                        let row_ptr = ptr.add(y * pitch) as *mut u32;
+                        row_ptr.add(x).write(cpu.output_texture[x * 160 + y]);
                     }
                 }
             })?;

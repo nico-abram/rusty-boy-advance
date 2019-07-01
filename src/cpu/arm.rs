@@ -7,13 +7,6 @@ use super::cpsr::CPSR;
 use super::utils::AsBoolSlice;
 use super::{Cpu, CpuMode, SWI_HANDLER};
 
-/// Print debug value as hex
-macro_rules! dbgx {
-    ($val:expr) => {
-        dbg!(format!("{:x?}", $val))
-    };
-}
-
 pub(crate) enum Cond {
     /// Equal (Z)
     EQ,
@@ -100,6 +93,7 @@ pub(crate) fn check_cond(cpu: &mut Cpu, opcode: u32) -> bool {
 
 /// Get the lower 5 nibbles (2.5 bytes) as bytes
 #[inline]
+#[allow(clippy::identity_op)]
 fn as_u8_nibbles(opcode: u32) -> (u8, u8, u8, u8, u8) {
     (
         ((opcode & 0x000F_0000) >> 16) as u8,
@@ -264,15 +258,15 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
             _ => unimplemented!("Invalid instruction"),
         }
     };
-    let mut addr =
-        ((cpu.regs[rn] as i64) + if is_up { offset as i64 } else { -(offset as i64) }) as u32;
+    let mut addr = (i64::from(cpu.regs[rn])
+        + if is_up { i64::from(offset) } else { -i64::from(offset) }) as u32;
     if rn == 15 {
         addr += 4;
     }
     if is_load {
         cpu.regs[rd] = if is_byte_size {
             // Least significant byte
-            cpu.fetch_byte(((addr) / 4u32) * 4u32) as u32
+            u32::from(cpu.fetch_byte(((addr) / 4u32) * 4u32))
         } else {
             cpu.fetch_u32(addr)
         };
@@ -312,8 +306,8 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
     }
     let operation = ((opcode & 0x01E0_0000) >> 21) as u8;
     let (op2, shift_carry) = if immediate {
-        let ror_shift = (third_byte as u32) * 2;
-        let val = (lowest_byte + second_byte * 16) as u32;
+        let ror_shift = u32::from(third_byte) * 2;
+        let val = u32::from(lowest_byte + second_byte * 16);
         (val.rotate_right(ror_shift), Some((val & (1u32 << ror_shift)) != 0))
     } else {
         let register_value: u32 = cpu.regs[lowest_byte as usize];
@@ -322,7 +316,7 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
         let shift_amount = if shift_by_register {
             cpu.regs[third_byte as usize]
         } else {
-            let shift_amount = (third_byte as u32) * 2 + ((second_byte & 0x8) as u32);
+            let shift_amount = u32::from(third_byte) * 2 + u32::from(second_byte & 0x8);
             imm_shift_zero = shift_amount == 0;
             shift_amount
         };
@@ -498,8 +492,8 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
 }
 /// Move to Status Register
 fn MSR(cpu: &mut Cpu, opcode: u32) {
-    const FLAGS_MASK: u32 = 0xFF000000;
-    const STATE_MASK: u32 = 0x00000020;
+    const FLAGS_MASK: u32 = 0xFF00_0000;
+    const STATE_MASK: u32 = 0x0000_0020;
     const PRIVACY_MASK: u32 = 0x0000_00CF;
     dbg!("msr");
     let immediate = as_extra_flag(opcode);
@@ -508,7 +502,7 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
     let change_control_fields = (opcode & 0x0001_0000) != 0; // mode, thumb, etc
     let operand = if immediate {
         let (_, _, shift, second, first) = as_u8_nibbles(opcode);
-        ((first as u32) + (second as u32) * 16).rotate_right(2 * (shift as u32))
+        (u32::from(first) + u32::from(second) * 16).rotate_right(2 * u32::from(shift))
     } else {
         cpu.regs[(opcode & 0x0000_000F) as usize]
     };
@@ -534,7 +528,7 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
         let invalid_bits_mask = !valid_bits_mask;
         cpu.cpsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
         if current_mode != CpuMode::User && change_control_fields {
-            cpu.set_mode(CpuMode::from_byte(((operand & 0x0000000F) | 0x00000010) as u8));
+            cpu.set_mode(CpuMode::from_byte(((operand & 0x0000_000F) | 0x0000_0010) as u8));
             cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
         }
     };
