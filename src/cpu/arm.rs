@@ -109,6 +109,7 @@ fn as_usize_nibbles(opcode: u32) -> (usize, usize, usize, usize, usize) {
     let (b0, b1, b2, b3, b4) = as_u8_nibbles(opcode);
     (b0 as usize, b1 as usize, b2 as usize, b3 as usize, b4 as usize)
 }
+
 /// Get bits 24-20 as bools
 #[inline]
 fn as_flags(opcode: u32) -> (bool, bool, bool, bool, bool) {
