@@ -1,6 +1,7 @@
 use crate::cpu::Cpu;
 use beryllium::*;
 
+#[allow(clippy::unneeded_field_pattern)]
 pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
     let mut frames_left_to_run = frames_to_run;
     let sdl = unsafe { beryllium::init() }?;

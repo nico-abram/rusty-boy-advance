@@ -81,7 +81,6 @@ impl Cpu {
         if mode == CpuMode::Privileged || mode == CpuMode::User {
             None
         } else {
-            dbg!(self.cpsr.mode().as_usize() - 1);
             Some(&mut self.spsrs[self.cpsr.mode().as_usize() - 1])
         }
     }
