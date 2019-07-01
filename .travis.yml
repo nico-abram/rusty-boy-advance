@@ -6,28 +6,29 @@ cache:
   - apt
   - homebrew
   - cargo
+
 matrix:
   include:
-  - env: ARCH=x86_64
+  - env: ARCH=i686-unknown-linux-gnu
     os: linux
-    deploy:
-    - provider: pages
-      skip-cleanup: true
-      github-token: $GITHUB_TOKEN
-      keep-history: false
-      local-dir: public
-      on:
-        branch: master
-  - env: ARCH=i686
+  - env: ARCH=x86_64-unknown-linux-gnu
     os: linux
-  - env: ARCH=x86_64
+  - env: ARCH=i686-pc-windows-msvc
     os: windows
-  - env: ARCH=i686
+  - env: ARCH=x86_64-pc-windows-msvc
     os: windows
-  - env: ARCH=x86_64
+  - env: ARCH=x86_64-apple-darwin
     os: osx
-  - env: ARCH=i686
+  - env: ARCH=i686-apple-darwin
     os: osx
+  #fermium doesn't fully work on 32bit targets at the moment
+  allow_failures:
+  - env: ARCH=i686-apple-darwin
+    os: osx
+  - env: ARCH=i686-unknown-linux-gnu
+    os: linux
+  - env: ARCH=i686-pc-windows-msvc
+    os: windows
 
 addons:
   apt:
@@ -45,6 +46,25 @@ addons:
     - sdl2-image
     - sdl2-mixer
     - sdl2-ttf
+
+script:
+  - rustup default nightly
+  - rustup target add $ARCH
+  - cargo build --target=$ARCH
+  - |
+    if [ $TRAVIS_OS_NAME == "linux" && $ARCH == "x86_64" ]; then
+      export DO_DEPLOY="yes";
+    fi
+
+deploy:
+  provider: pages
+  skip-cleanup: true
+  github-token: $GITHUB_TOKEN
+  keep-history: false
+  local-dir: public
+  on:
+    branch: master
+    condition: $DO_DEPLOY = yes
 
 before_deploy:
   - cargo bench
