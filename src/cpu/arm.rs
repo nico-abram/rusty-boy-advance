@@ -109,7 +109,7 @@ fn as_usize_nibbles(opcode: u32) -> (usize, usize, usize, usize, usize) {
     let (b0, b1, b2, b3, b4) = as_u8_nibbles(opcode);
     (b0 as usize, b1 as usize, b2 as usize, b3 as usize, b4 as usize)
 }
-/// Get bits 23-27 as bools
+/// Get bits 24-20 as bools
 #[inline]
 fn as_flags(opcode: u32) -> (bool, bool, bool, bool, bool) {
     (
@@ -146,12 +146,20 @@ fn BX(cpu: &mut Cpu, opcode: u32) {
 /// LR (Register 14). If using nested functions, that requires pushing LR onto the stack.
 fn B(cpu: &mut Cpu, opcode: u32) {
     cpu.clocks += 3; // TODO: Clocks
-    let offset = opcode & 0x00FF_FFFF;
+    let offset = (opcode & 0x007F_FFFF) << 2; //*4
+    let is_positive = (opcode & 0x0080_0000) == 0;
     let is_branch_and_link = (opcode & 0x0100_0000) != 0;
+    let pc = cpu.regs[15];
     if is_branch_and_link {
-        *cpu.LR() = *cpu.pc();
+        *cpu.LR() = pc;
     }
-    *cpu.pc() += 4 + offset * 4;
+    cpu.regs[15] = 4u32
+        .overflowing_add(if is_positive {
+            pc.overflowing_add(offset).0
+        } else {
+            pc.overflowing_sub(!(offset | 0xFF00_0003) + 4).0
+        })
+        .0;
 }
 /// Software Interrupt
 ///
@@ -282,12 +290,43 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
 }
 /// Block Data Transfer
 fn BDT(cpu: &mut Cpu, opcode: u32) {
-    let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load) = as_flags(opcode);
-    let (rn, rd, _, _, _) = as_usize_nibbles(opcode);
-    let register_list = opcode & 0x000F_FFFF;
-    // TODO: the thing
+    let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) =
+        as_flags(opcode);
+    let (rn, _, _, _, _) = as_usize_nibbles(opcode);
+    let (_, _, _, rlist2, rlist1) = as_u8_nibbles(opcode);
+    let (rlist2, rlist1) = (rlist1.as_bools(), rlist2.as_bools());
+    let rlist_iter = rlist1.iter().chain(rlist2.iter()).enumerate();
+    let mut sp = cpu.regs[13];
+    // TODO: Is this right or was it the other way around?
+    // up & load => +
+    // down & load => -
+    // up & store => -
+    // down & store => +
+    let operation: fn(&mut u32, u32) =
+        if (is_up && is_load_else_store) || !(is_up || is_load_else_store) {
+            |sp, offset| {
+                *sp += offset;
+            }
+        } else {
+            |sp, offset| {
+                *sp -= offset;
+            }
+        };
+    for (idx, _) in rlist_iter.filter(|(idx, &boolean)| boolean) {
+        // Pre offsetting matters if we're storing the stack pointer(reg 13)
+        if is_pre_offseted {
+            sp += 4;
+        }
+        if is_load_else_store {
+            cpu.regs[15 - idx] = cpu.fetch_u32(sp);
+        } else {
+            cpu.write_u32(sp, cpu.regs[15 - idx]);
+        }
+        if !is_pre_offseted {
+            sp += 4;
+        }
+    }
     cpu.clocks += 0; // todo:clocks
-    unimplemented!()
 }
 /// Data Processing or PSR transfer
 /// This handles all ALU operations
@@ -310,15 +349,15 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
         let shift_by_register = (opcode & 0x0000_0010) != 0;
         let mut imm_shift_zero = false;
         let shift_amount = if shift_by_register {
-            cpu.regs[third_byte as usize]
+            cpu.regs[third_byte as usize] & 0x0000_000F
         } else {
-            let shift_amount = u32::from(third_byte) * 2 + u32::from(second_byte & 0x8);
+            let shift_amount = (opcode & 0x0000_0F80) >> 7;
             imm_shift_zero = shift_amount == 0;
             shift_amount
         };
-        let shift_type = ((opcode & 0x0000_0060) >> 6) as u8;
+        let shift_type = ((opcode & 0x0000_0060) >> 5) as u8;
         let (op2, shift_carry) = if imm_shift_zero {
-            let shift_carry = Some(false);
+            // Handle special shift by 0 case
             match shift_type {
                 0 => (register_value, None),
                 1 => (0, Some((register_value & 0x8000_0000) != 0)),

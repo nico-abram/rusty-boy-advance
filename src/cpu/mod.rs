@@ -271,7 +271,12 @@ impl Cpu {
     }
     pub fn state_as_string(&mut self) -> String {
         let pc = *self.pc();
-        format!("Registers: {:x?}\n PC:{:x} {}", self.regs, pc, self.cpsr.to_string())
+        format!(
+            "Registers: {:x?}\n PC:{:x} {}",
+            self.regs.iter().enumerate().collect::<Vec<_>>(),
+            pc,
+            self.cpsr.to_string()
+        )
     }
     pub fn run_one_instruction(&mut self) {
         println!("{}", self.state_as_string());

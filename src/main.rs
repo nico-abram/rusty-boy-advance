@@ -6,7 +6,7 @@
 use clap::{App, Arg};
 
 mod cpu;
-mod renderer_beryllium;
+mod renderer;
 
 #[allow(clippy::expect_fun_call)]
 fn main() -> Result<(), String> {
@@ -43,6 +43,15 @@ fn main() -> Result<(), String> {
                 .required(false),
         )
         .arg(
+            Arg::with_name("bios")
+                .short("b")
+                .long("bios-file")
+                .value_name("BIOS file")
+                .help("If given, will use as BIOS")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
             Arg::with_name("instructions")
                 .short("i")
                 .long("instructions-to-run")
@@ -56,12 +65,17 @@ fn main() -> Result<(), String> {
     let frames_to_run = matches.value_of("frames").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
     let instructions_to_run =
         matches.value_of("instructions").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
+    //TODO: Actually use the given bios file
+    let bios_file = matches.value_of("bios").map(|rom_filename| {
+        std::fs::File::open(rom_filename)
+            .expect(format!("BIOS file {} not found", rom_filename).as_str())
+    });
     let rom_filename = matches.value_of("rom").unwrap();
     let headless = matches.is_present("headless");
 
     let mut cpu = cpu::Cpu::new();
     let file = std::fs::File::open(rom_filename)
-        .expect(format!("File {} not found", rom_filename).as_str());
+        .expect(format!("ROM file {} not found", rom_filename).as_str());
     let reader = std::io::BufReader::new(file);
     cpu.load(reader);
 
@@ -78,7 +92,7 @@ fn main() -> Result<(), String> {
             cpu.run_forever();
         }
     } else {
-        renderer_beryllium::run(&mut cpu, frames_to_run).unwrap();
+        renderer::run(&mut cpu, frames_to_run).unwrap();
     }
     Ok(())
 }
