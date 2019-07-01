@@ -8,7 +8,7 @@ cache:
   - cargo
 matrix:
   include:
-  - ARCH=x86_64
+  - env: ARCH=x86_64
     os: linux
     deploy:
       provider: pages
@@ -18,15 +18,15 @@ matrix:
       local-dir: public
       on:
         branch: master
-  - ARCH=i686
+  - env: ARCH=i686
     os: linux
-  - ARCH=x86_64
+  - env: ARCH=x86_64
     os: windows
-  - ARCH=i686
+  - env: ARCH=i686
     os: windows
-  - ARCH=x86_64
+  - env: ARCH=x86_64
     os: osx
-  - ARCH=i686
+  - env: ARCH=i686
     os: osx
 env:
   - ARCH=x86_64
@@ -64,4 +64,4 @@ before_deploy:
     fi
   - pwd
   - ls
-  - echo "<meta h
+- echo "<meta h
