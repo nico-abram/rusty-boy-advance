@@ -96,8 +96,6 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let rd = as_bits_8_to_10(opcode);
     let offset = u32::from(as_low_byte(opcode));
     let operation = as_bits_11_and_12(opcode);
-    println!("{:x}", opcode);
-    println!("{:x}", operation);
     let rd_val = cpu.regs[rd];
     if operation == 1 {
         // CMP handled separately since it doesnt store the result
@@ -106,8 +104,6 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
         cpu.clocks += 0; // TODO: clocks
         return;
     }
-    dbg!(rd);
-    println!("{:x}", offset);
     cpu.regs[rd] = match operation {
         0 => {
             // MOV
@@ -454,7 +450,6 @@ fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
     let substract_else_add = (byte & 0x80) != 0;
     let byte7 = byte & 0x0000_007F;
     let offset = u32::from(byte7) << 2;
-    dbg!(offset);
     let sp = cpu.regs[13];
     cpu.regs[13] = if substract_else_add {
         sp.overflowing_sub(offset).0
@@ -484,11 +479,9 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
         // TODO: Does this need reversing?
         for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(idx, &boolean)| boolean) {
             cpu.write_u32(sp, cpu.regs[7 - idx]);
-            dbg!(7 - idx);
             sp -= 4;
         }
         if pc_or_lr_flag {
-            dbg!("LR");
             cpu.write_u32(sp, cpu.regs[14]); // PUSH LR
             sp -= 4;
         }
@@ -519,24 +512,16 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
 /// B{COND}
 fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
     let offset = u32::from(as_low_byte(opcode)) << 1;
-    dbg!(offset);
-    println!("{:x}", offset);
     let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
-    dbg!(offset);
-    println!("{:x}", offset);
     let cond = (opcode << 4) & 0xF000;
     let should_not_jump = super::arm::check_cond(cpu, u32::from(cond) << 16);
-    dbg!(should_not_jump);
-    dbg!(is_negative);
     if should_not_jump {
         cpu.clocks += 0; // TODO: clocks
         return;
     }
     cpu.regs[15] = if is_negative {
-        println!("{:x}", (!offset) & 0x0000_00FE);
         cpu.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
     } else {
-        println!("{:x}", offset);
         cpu.regs[15].overflowing_add(offset + 2).0
     };
     cpu.clocks += 0; // TODO: clocks
@@ -548,12 +533,9 @@ fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
 }
 /// B
 fn branch(cpu: &mut Cpu, opcode: u16) {
-    dbg!("branch");
     //let offset = (opcode & 0x01FF) as u32;
     let offset = u32::from(as_low_11bits(opcode)) << 1;
-    println!("{:x}", offset);
     let is_negative = (opcode & 0x0200) != 0;
-    dbg!(is_negative);
     let pc = (*cpu.pc()).overflowing_add(2).0;
     *cpu.pc() =
         if is_negative { pc.overflowing_sub(offset).0 } else { pc.overflowing_add(offset).0 };

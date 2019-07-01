@@ -275,10 +275,6 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
     } else {
         cpu.write_u32(addr, cpu.regs[rd]);
     }
-    println!(
-        "data trans load:{} rn:{} rd:{} offset:{:x?} rn:{:x?} rd:{:x?} addr:{:x?}",
-        is_load, rn, rd, offset, cpu.regs[rn], cpu.regs[rd], addr
-    );
     if !is_pre_offseted || bit_21 {
         cpu.regs[rn] = addr;
     }
@@ -444,12 +440,8 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
             }
         }
         9 => {
-            dbg!("teq");
-            dbg!(rn);
-            dbg!(op2);
             //teq
             let res = rn ^ op2;
-            dbg!(res);
             if rd == 15 {
                 set_all_flags(res, None, None);
             } else {
@@ -495,7 +487,6 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
     const FLAGS_MASK: u32 = 0xFF00_0000;
     const STATE_MASK: u32 = 0x0000_0020;
     const PRIVACY_MASK: u32 = 0x0000_00CF;
-    dbg!("msr");
     let immediate = as_extra_flag(opcode);
     let (_, _, use_spsr, _, _) = as_flags(opcode);
     let change_flags_fields = (opcode & 0x0008_0000) != 0; // i.e overflow/zero/etc
@@ -566,7 +557,7 @@ fn decode_arm(opcode: u32) -> fn(&mut Cpu, u32) {
             opcode,
             opcode,
             bits27_20,
-            bits11_4
+            bits11_4 // TODO: Jump to undef handler
         ),
         ([F, T, _, _, _, _, _, _], _) => SDT,
         ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => MUL,
