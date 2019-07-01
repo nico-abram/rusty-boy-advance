@@ -4,16 +4,42 @@ rust:
   
 cache:
   - apt
+  - homebrew
   - cargo
 
-before_install:
-  - sudo apt-get install -qq libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libegl1-mesa-dev libgles2-mesa-dev
+env:
+  - ARCH=x86_64
+  - ARCH=i686
+
+os:
+  - linux
+  - osx
+  - windows
+
+addons:
+  apt:
+    packages:
+    - libsdl2-dev
+    - libsdl2-image-dev
+    - libsdl2-mixer-dev
+    - libsdl2-ttf-dev
+    - libegl1-mesa-dev
+    - libgles2-mesa-dev
+  homebrew:
+    packages:
+    - sdl2
+    - sdl2-image
+    - sdl2-mixer
+    - sdl2-ttf
 
 before_deploy:
   - cargo bench
   - cargo doc --document-private-items --no-deps
   - mkdir public
   - cp -r target/doc public/
+  - if [ $TRAVIS_OS_NAME == "windows" ]; then
+      cp -r target/doc C:/Users/travis/build/nico-abram/rusty-boy-advance/public;
+    fi
   - pwd
   - ls
   - echo "<meta http-equiv=refresh content=0;url=doc/rgba/index.html>" > public/index.html
