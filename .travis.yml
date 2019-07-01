@@ -26,6 +26,7 @@ addons:
     - libegl1-mesa-dev
     - libgles2-mesa-dev
   homebrew:
+    update: true
     packages:
     - sdl2
     - sdl2-image
