@@ -7,22 +7,15 @@ pub(crate) struct CPSR(pub(crate) u32);
 fn is_set(x: u32, bit: u32) -> bool {
   (x & bit) == bit
 }
+#[inline]
+pub(crate) fn carry_from(op1: u32, op2: u32, res: u32) -> bool {
+  ((op1 >> 31) + (op2 >> 31)) > (res >> 31)
+}
+#[inline]
+pub(crate) fn borrow_from(positive: u32, negative: u32) -> bool {
+  positive >= negative
+}
 impl CPSR {
-  pub(crate) fn to_string(self) -> String {
-    format!(
-      "N:{} C:{} Z:{} V:{} Q:{} I:{} F:{} T:{} mode:{:x?}({:x?})",
-      self.N(),
-      self.C(),
-      self.Z(),
-      self.V(),
-      self.Q(),
-      self.I(),
-      self.F(),
-      self.T(),
-      self.mode(),
-      self.mode().as_byte()
-    )
-  }
   #[inline]
   fn is_set(self, bit: u32) -> bool {
     is_set(self.0, bit)
@@ -71,16 +64,6 @@ impl CPSR {
   pub(crate) fn set_V(&mut self, v: bool) {
     self.set(0x1000_0000, v)
   }
-  /// Sticky overflow
-  #[inline]
-  pub(crate) fn Q(self) -> bool {
-    self.is_set(0x0800_0000)
-  }
-  // Sticky overflow
-  #[inline]
-  pub(crate) fn set_Q(&mut self, v: bool) {
-    self.set(0x0800_0000, v)
-  }
   /// IRQ disabled
   #[inline]
   pub(crate) fn I(self) -> bool {
@@ -124,9 +107,12 @@ impl CPSR {
 
   #[inline]
   pub(crate) fn addition_carries(res: u32, op1: u32, op2: u32) -> bool {
+    carry_from(op1, op2, res)
+    /*
     ((op1 & 0x8000_0000) != 0 && (op2 & 0x8000_0000) != 0)
       || ((res & 0x8000_0000) != 0 && !(op1 & 0x8000_0000) != 0)
       || ((res & 0x8000_0000) != 0 && !(op2 & 0x8000_0000) != 0)
+      */
   }
   #[inline]
   pub(crate) fn set_all_status_flags_for_addition(
@@ -158,5 +144,21 @@ impl CPSR {
       self.set_V(overflow);
     }
     self.set_neutral_flags(res);
+  }
+}
+impl std::fmt::Display for CPSR {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(
+      f,
+      "N:{} C:{} Z:{} V:{} I:{} F:{} T:{} mode:{:x?}",
+      self.N(),
+      self.C(),
+      self.Z(),
+      self.V(),
+      self.I(),
+      self.F(),
+      self.T(),
+      self.mode().as_byte()
+    )
   }
 }

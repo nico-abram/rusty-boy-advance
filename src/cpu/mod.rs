@@ -1,6 +1,14 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+// Hack so I can "easily" disable a bunch of prints throught the program
+macro_rules! println_maybe {
+  ($($arg:tt)*) => {{
+    let x = format!($($arg)*);
+    //dbg!(x);
+    //println!($($arg)*);
+  }};
+}
 mod arm;
 mod cpsr;
 mod cpu_mode;
@@ -21,6 +29,8 @@ const DATA_ABORT_HANDLER: u32 = 0x0000_0010;
 const ADDRESS_TOO_BIG_HANDLER: u32 = 0x0000_0014;
 const NORMAL_INTERRUPT_HANDLER: u32 = 0x0000_0018;
 const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
+
+pub(crate) static mut COUNT: u32 = 0;
 
 pub struct Cpu {
   //// Output image
@@ -49,6 +59,7 @@ pub struct Cpu {
   palette_ram: [u8; KB],
   vram: [u8; 96 * KB],
   oam: [u8; KB],
+  io_mem: [u8; 1022],
   pub(crate) clocks: u32,
 }
 impl Cpu {
@@ -68,6 +79,7 @@ impl Cpu {
       palette_ram: [0u8; KB],
       vram: [0u8; 96 * KB],
       oam: [0u8; KB],
+      io_mem: [0u8; 1022],
       game_pak: [0u8; 64 * KB],
       clocks: 0u32,
     };
@@ -142,7 +154,11 @@ impl Cpu {
       0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
       0x0300_8000..=0x03FF_FFFF => self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF],
       //I/O Registers             (1022 Bytes)
-      0x0400_0000..=0x0400_03FE => self.wram_chip[000],
+      0x0400_0000..=0x0400_03FE => self.io_mem[addr - 0x0400_0000], //TODO:IO
+      0x0400_4000..=0x04FF_FFFF => {
+        dbg!("Bad io read at {:x}", addr);
+        0
+      }
       //Internal Display Memory
       0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000], /* BG/OBJ Palette RAM        (1 Kbyte) */
       0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000], /* VRAM - Video RAM          (96 KBytes) */
@@ -167,18 +183,19 @@ impl Cpu {
       }
       //WRAM - On-board Work RAM  (256 KBytes) 2 Wait
       0x0200_0000..=0x0203_FFFF => {
-        self.wram_board[addr - 0x0200_0000] = byte;
+        self.wram_board[addr & 0x0003_FFFF] = byte;
       }
       //WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
-      0x0300_0000..=0x0300_7FFF => {
-        self.wram_chip[addr - 0x0300_0000] = byte;
+      0x0300_0000..=0x03FF_FFFF => {
+        self.wram_chip[addr & 0x0000_7FFF] = byte;
       }
-      0x0300_8000..=0x03FF_FFFF => {
-        self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF] = byte;
-      }
-      //I/O Registers             (1022 Bytes)
+      //I/O Registers             (1022 Bytes)0xFFFF
       0x0400_0000..=0x0400_03FE => {
-        self.wram_chip[000] = byte;
+        self.io_mem[addr - 0x0400_0000] = byte;
+      }
+      0x0400_0400..=0x04FF_FFFF => {
+        let addr = addr & 0xFFFF;
+        self.io_mem[0] = byte;
       }
       //Internal Display Memory
       0x0500_0000..=0x0500_03FF => {
@@ -208,8 +225,8 @@ impl Cpu {
     }
   }
   pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
-    self.write_u8(addr, (value >> 8) as u8);
-    self.write_u8(addr + 1, value as u8);
+    self.write_u8(addr + 1, (value >> 8) as u8);
+    self.write_u8(addr, value as u8);
   }
   pub(crate) fn LR(&mut self) -> &mut u32 {
     self.reg_mut(14)
@@ -230,6 +247,8 @@ impl Cpu {
     self.output_texture = [0u32; 240 * 160];
     self.fiq_only_banks = [[0u32; 5]; 2];
     self.all_modes_banks = [[0u32; 2]; 6];
+    self.io_mem = [0u8; 1022];
+    self.write_u32(0x0400_0088, 0x200);
     self.spsrs = [CPSR(0x0000_0000F); 5];
     self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x0300_7FA0;
     self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x0300_7FE0;
@@ -259,7 +278,7 @@ impl Cpu {
     for (input, out) in buf.iter().zip(self.game_pak.iter_mut()) {
       *out = *input;
     }
-    println!(
+    println_maybe!(
       "Running rom '{}' (Code: {})",
       title,
       String::from_utf8(code.to_vec()).unwrap_or_else(|_| String::from("Invalid"))
@@ -269,13 +288,16 @@ impl Cpu {
     self.cpsr.T()
   }
   pub fn state_as_string(&mut self) -> String {
-    let pc = *self.pc();
     format!(
-      "Registers: \n{:x?}\n PC:{:x} {}",
-      //self.regs.iter().enumerate().collect::<Vec<_>>(), // TODO: Fix my vscode terminal not line wrapping ??????
-      self.regs,
-      pc,
-      self.cpsr.to_string()
+      "{}\n{}",
+      self
+        .regs
+        .iter()
+        .enumerate()
+        .map(|(idx, val)| format!("r{}:{:x}", idx, val))
+        .collect::<Vec<_>>()
+        .join(" "),
+      self.cpsr
     )
   }
   pub fn run_one_instruction(&mut self) {
@@ -285,10 +307,13 @@ impl Cpu {
     } else {
       arm::execute_one_instruction(self);
     }
+    unsafe {
+      COUNT += 1;
+    }
   }
   pub fn run_one_frame(&mut self) {
     // TODO: However this is meant to be done
-    loop {
+    for _ in 0..100 {
       self.run_one_instruction();
     }
   }

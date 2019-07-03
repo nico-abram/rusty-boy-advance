@@ -15,7 +15,7 @@ fn main() -> Result<(), String> {
     .about("GBA emulator in rust")
     .arg(
       Arg::with_name("rom")
-        .short("r")
+        .short('r')
         .long("rom")
         .value_name("ROM file")
         .help("The rom file to run")
@@ -24,7 +24,7 @@ fn main() -> Result<(), String> {
     )
     .arg(
       Arg::with_name("frames")
-        .short("f")
+        .short('f')
         .long("frames")
         .value_name("Frames to run")
         .help("The number of frames to run before stopping (0 means none)")
@@ -34,7 +34,7 @@ fn main() -> Result<(), String> {
     )
     .arg(
       Arg::with_name("headless")
-        .short("h")
+        .short('h')
         .long("headless")
         .value_name("Headless")
         .help("If given, will run without a graphical window")
@@ -43,7 +43,7 @@ fn main() -> Result<(), String> {
     )
     .arg(
       Arg::with_name("bios")
-        .short("b")
+        .short('b')
         .long("bios-file")
         .value_name("BIOS file")
         .help("If given, will use as BIOS")
@@ -52,7 +52,7 @@ fn main() -> Result<(), String> {
     )
     .arg(
       Arg::with_name("instructions")
-        .short("i")
+        .short('i')
         .long("instructions-to-run")
         .value_name("Instructions")
         .help("Number of instructions to execute before stopping. Forces headless")

@@ -42,7 +42,7 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
             }
           }
         }
-        Event::Quit { timestamp:_ } => {
+        Event::Quit { timestamp: _ } => {
           break 'game_loop;
         }
         _ => (),

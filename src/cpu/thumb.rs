@@ -2,7 +2,11 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use super::{utils::AsBoolSlice, Cpu};
+use super::{
+  cpsr::{borrow_from, carry_from},
+  utils::AsBoolSlice,
+  Cpu,
+};
 
 #[inline]
 fn as_11th_bit(opcode: u16) -> bool {
@@ -46,14 +50,6 @@ fn as_bits_11_and_12(opcode: u16) -> u16 {
   (opcode >> 11) & 0x3
 }
 #[inline]
-fn carry_from(op1: u32, op2: u32, result: u32) -> bool {
-  ((op1 >> 31) + (op2 >> 31)) > (result >> 31)
-}
-#[inline]
-fn borrow_from(positive: u32, negative: u32, _: u32) -> bool {
-  positive >= negative
-}
-#[inline]
 fn sign_flag(N: u32) -> bool {
   (N >> 31) == 1
 }
@@ -64,14 +60,19 @@ fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
   let offset = as_bits_6_to_10(opcode);
   let operand = cpu.regs[rs];
   // TODO: Special 0 shifts
-  cpu.regs[rd] = match operation {
+  let res = match operation {
     0 => operand << offset,
     1 => operand >> offset,
     2 => ((operand as i32) >> offset) as u32,
     3 => unimplemented!("reserved"),
     _ => unimplemented!("Impossible?"), //std::hint::unreachable_unchecked()
   };
-  //TODO: Z=zeroflag, N=sign, C=carry (except LSL#0: C=unchanged), V=unchanged.
+  cpu.regs[rd] = res;
+  cpu.cpsr.set_all_status_flags(
+    res,
+    if offset == 0 && operation == 0 { None } else { Some((operand >> (32 - offset)) & 1 != 0) },
+    None,
+  );
   cpu.clocks += 0; // TODO: clocks
 }
 /// ADD/SUB
@@ -83,20 +84,23 @@ fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
   let second_operand = if immediate { rn as u32 } else { cpu.regs[rn] };
   cpu.regs[rd] = if is_substraction {
     let (result, overflow) = first_operand.overflowing_sub(second_operand);
+    //second_operand > first_operand
     cpu.cpsr.set_all_status_flags(
-      cpu.regs[rd],
-      Some(second_operand > first_operand),
+      result,
+      Some(borrow_from(first_operand, second_operand)),
       Some(overflow),
     );
     result
   } else {
     let (result, overflow) = first_operand.overflowing_add(second_operand);
+    cpu.cpsr.set_all_status_flags(result, Some(overflow), Some(false));
+    /*
     cpu.cpsr.set_all_status_flags_for_addition(
       cpu.regs[rd],
       first_operand,
       second_operand,
       Some(overflow),
-    );
+    );*/
     result
   };
   cpu.clocks += 0; // TODO: clocks
@@ -193,7 +197,7 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
       cpu.regs[rd] = result;
       cpu.cpsr.set_all_status_flags(
         result,
-        Some(carry_from(rd_val, rs_val, result)),
+        Some(carry_from(rd_val, rs_val + (cpu.cpsr.C() as u32), result)), // TODO: Account for overflow in rs+C
         Some(overflow || overflow2),
       );
     }
@@ -204,7 +208,7 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
       cpu.regs[rd] = result;
       cpu.cpsr.set_all_status_flags(
         result,
-        Some(borrow_from(rd_val, rs_val + ((!cpu.cpsr.C()) as u32), result)),
+        Some(borrow_from(rd_val, rs_val.overflowing_add((!cpu.cpsr.C()) as u32).0) || overflow2),
         Some(overflow || overflow2),
       );
     }
@@ -233,7 +237,7 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
       // NEG (Negate)
       let (result, overflow) = 0u32.overflowing_sub(rs_val);
       cpu.regs[rd] = result;
-      cpu.cpsr.set_all_status_flags(result, Some(borrow_from(0, rs_val, result)), Some(overflow));
+      cpu.cpsr.set_all_status_flags(result, Some(borrow_from(0, rs_val)), Some(overflow));
     }
     0xA => {
       // CMP (Compare)
@@ -276,11 +280,11 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
 /// HiReg/BX
 fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
-  let msbs = (opcode & 0x0040) >> 6;
-  let msbd = (opcode & 0x0080) >> 7;
+  let rs_most_significant_bit = (opcode & 0x0040) >> 6;
+  let rd_most_significant_bit = (opcode & 0x0080) >> 7;
   let operation = (opcode & 0x0300) >> 8;
-  let rs = rs + ((msbs as usize) << 3);
-  let rd = rd + ((msbd as usize) << 3);
+  let rs = rs + ((rs_most_significant_bit as usize) << 3);
+  let rd = rd + ((rd_most_significant_bit as usize) << 3);
   match operation {
     0 => {
       // ADD
@@ -292,7 +296,7 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
       let (op1, op2) = (cpu.regs[rd], cpu.regs[rs]);
       let (res, overflow) = op1.overflowing_sub(op2);
       // TODO: Is this check right?
-      cpu.cpsr.set_all_status_flags(res, Some(op2 > op1), Some(overflow));
+      cpu.cpsr.set_all_status_flags(res, Some(borrow_from(op1, op2)), Some(overflow));
     }
     2 => {
       // MOV
@@ -344,6 +348,7 @@ fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
 }
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
+  println!("ohayo");
   let H = as_11th_bit(opcode);
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let sign_extend = (opcode & 0x0400) != 0;
@@ -390,7 +395,7 @@ fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) {
   }
   cpu.clocks += 0; // TODO: clocks
 }
-/// LDR/STR {H}
+/// LDR/STR H
 fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
   let is_load_else_store = as_11th_bit(opcode);
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);
@@ -399,7 +404,6 @@ fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
   let addr = offset + cpu.regs[rb];
   if is_load_else_store {
     cpu.regs[rd] = u32::from(cpu.fetch_u16(addr));
-  } else {
     cpu.write_u16(addr, cpu.regs[rd] as u16);
   }
   cpu.clocks += 0; // TODO: clocks
@@ -451,23 +455,28 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
   let rlist = as_low_byte(opcode);
   let mut sp = cpu.regs[13];
   if is_pop_else_push {
-    // TODO: Does this need reversing?
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
-      cpu.regs[7 - idx] = cpu.fetch_u32(sp);
+    // TODO: Does this need reversing (So unreversed)? (After the enumerate)
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean).rev() {
       sp += 4;
+      //println!("pop {:x}:{:x}({})", sp, cpu.fetch_u32(sp), 7 - idx);
+      cpu.regs[7 - idx] = cpu.fetch_u32(sp);
     }
     if pc_or_lr_flag {
-      cpu.regs[15] = cpu.fetch_u32(sp); // POP PC
       sp += 4;
+      //println!("OWO");
+      //println!("pop {:x}:{:x}({})", sp, cpu.fetch_u32(sp), 15);
+      cpu.regs[15] = cpu.fetch_u32(sp) & (!0x0000_0001); // POP PC
     }
   } else {
-    // TODO: Does this need reversing?
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
-      cpu.write_u32(sp, cpu.regs[7 - idx]);
+    if pc_or_lr_flag {
+      //println!("push {:x}:{:x}({})", sp, cpu.regs[14], 14);
+      cpu.write_u32(sp, cpu.regs[14]); // PUSH LR
       sp -= 4;
     }
-    if pc_or_lr_flag {
-      cpu.write_u32(sp, cpu.regs[14]); // PUSH LR
+    // TODO: Does this need reversing? (After the enumerate)
+    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
+      //println!("push {:x}:{:x}({})", sp, cpu.regs[7 - idx], 7 - idx);
+      cpu.write_u32(sp, cpu.regs[7 - idx]);
       sp -= 4;
     }
   }
@@ -498,8 +507,8 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
 fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
   let offset = u32::from(as_low_byte(opcode)) << 1;
   let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
-  let cond = (opcode << 4) & 0xF000;
-  let should_not_jump = super::arm::check_cond(cpu, u32::from(cond) << 16);
+  let cond = (opcode >> 8) & 0x000F;
+  let should_not_jump = super::arm::check_cond(cpu, u32::from(cond) << 28);
   if should_not_jump {
     cpu.clocks += 0; // TODO: clocks
     return;
@@ -530,16 +539,17 @@ fn branch(cpu: &mut Cpu, opcode: u16) {
 /// This is actually a 32 bit instruction (2 thumb instructions).
 ///
 /// The first one has the upper 11 bits and the second the lower 11
-fn branch_and_link_or_link_and_exchange(cpu: &mut Cpu, opcode: u16) {
-  //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
+fn branch_and_link_or_link_and_exchange_first_opcode(cpu: &mut Cpu, opcode: u16) {
   let upper_offset = (i32::from((as_low_11bits(opcode) as i16) << 5) << 7) as u32;
   let pc = cpu.regs[15];
   cpu.regs[14] = pc.overflowing_add(upper_offset).0.overflowing_add(2).0;
-  let next_instruction = cpu.fetch_u16(pc);
-  cpu.regs[15] += 2;
-  let lower_offset = u32::from(as_low_11bits(next_instruction) << 1);
+  cpu.clocks += 0; // TODO: clocks
+}
+fn branch_and_link_or_link_and_exchange_second_opcode(cpu: &mut Cpu, opcode: u16) {
+  //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
+  let lower_offset = u32::from(as_low_11bits(opcode) << 1);
   let pc = cpu.regs[15] + 2;
-  cpu.regs[15] = cpu.regs[14] + lower_offset;
+  cpu.regs[15] = cpu.regs[14].overflowing_add(lower_offset).0;
   cpu.regs[14] = pc - 1;
   cpu.clocks += 0; // TODO: clocks
 }
@@ -566,7 +576,8 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
     [T, T, F, T, T, T, T, T] => software_interrupt,
     [T, T, F, T, _, _, _, _] => conditional_branch,
     [T, T, T, F, F, _, _, _] => branch,
-    [T, T, T, T, _, _, _, _] => branch_and_link_or_link_and_exchange,
+    [T, T, T, T, F, _, _, _] => branch_and_link_or_link_and_exchange_first_opcode,
+    [T, T, T, T, T, _, _, _] => branch_and_link_or_link_and_exchange_second_opcode,
     _ => unimplemented!(),
   }
 }
@@ -575,7 +586,7 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u16(pc);
   *cpu.pc() += 2;
-  println!("{:x}", opcode);
+  println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
   let instruction = decode_thumb(opcode);
   instruction(cpu, opcode);
 }
@@ -610,7 +621,7 @@ mod tests {
       [T, T, F, T, T, T, T, T] => software_interrupt,
       [T, T, F, T, _, _, _, _] => conditional_branch,
       [T, T, T, F, F, _, _, _] => branch,
-      [T, T, T, T, _, _, _, _] => branch_and_link_or_link_and_exchange,
+      [T, T, T, T, _, _, _, _] => branch_and_link_or_link_and_exchange_first_opcode,
       _ => none,
     }
   }
@@ -638,7 +649,7 @@ mod tests {
       x if (x & 0b1111_1111) == 0b0110_1111 => software_interrupt,
       x if (x & 0b1111_0000) == 0b1101_0000 => conditional_branch,
       x if (x & 0b1111_1000) == 0b1110_0000 => branch,
-      x if (x & 0b1111_0000) == 0b1111_0000 => branch_and_link_or_link_and_exchange,
+      x if (x & 0b1111_0000) == 0b1111_0000 => branch_and_link_or_link_and_exchange_first_opcode,
       _ => none,
     }
   }

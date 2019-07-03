@@ -259,7 +259,6 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = second_byte;
     let register_value = cpu.regs[first_byte];
-    //TODO: Handle 0 special cases (Same as ALU operations)
     match shift_type & 6 {
       0 => register_value.overflowing_shl(shift_amount).0,
       2 => register_value.overflowing_shr(shift_amount).0,
@@ -294,10 +293,10 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
 fn BDT(cpu: &mut Cpu, opcode: u32) {
   let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) = as_flags(opcode);
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
-  let (_, rlist4, rlist3, rlist2, rlist1) = as_u8_nibbles(opcode);
-  let rlists = [rlist1, rlist2, rlist3, rlist4];
+  let (rlist2, rlist1) = (((opcode & 0x0000_FF00) >> 8) as u8, (opcode & 0x0000_00FF) as u8);
+  let rlists = [rlist1, rlist2];
   // TODO: Should that be (rlist1 & 0x1) ?
-  let is_psr = psr_or_user_mode && is_load_else_store && ((rlist4 & 0x8) != 0);
+  let is_psr = psr_or_user_mode && is_load_else_store && ((rlist2 & 0x80) != 0);
   let get_mut_reg: fn(&mut Cpu, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
     // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
     // "You must not use it in User mode or System mode.". How strict is that requirement?
@@ -317,39 +316,61 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
     |cpu, x| &mut cpu.regs[x]
   };
   let mut sp = *get_mut_reg(cpu, rn);
-  // TODO: Is this right or was it the other way around?
-  // up & load => -
-  // down & load => +
-  // up & store => +
-  // down & store => -
-  let operation: fn(&mut u32, u32) =
-    if (is_up && is_load_else_store) || !(is_up || is_load_else_store) {
-      |sp, offset| {
-        *sp -= offset;
-      }
-    } else {
-      |sp, offset| {
-        *sp += offset;
-      }
-    };
+  let operation: fn(&mut u32, u32) = if !is_up {
+    |sp, offset| {
+      *sp -= offset;
+    }
+  } else {
+    |sp, offset| {
+      *sp += offset;
+    }
+  };
   // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
-  for (byte_number, byte) in rlists.iter().enumerate() {
-    for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().skip(4).rev().enumerate() {
-      if bit_is_set {
-        let bit_number = byte_number * 4 + bit_in_byte;
-        // Pre//Post offsetting matters if we're storing the base register
-        if is_pre_offseted {
-          operation(&mut sp, 4);
-        }
-        let reg_number = bit_number - 1;
-        if is_load_else_store {
-          *get_mut_reg(cpu, reg_number) = cpu.fetch_u32(sp);
-        } else {
-          let val = *get_mut_reg(cpu, reg_number);
+  let is_push = !is_load_else_store;
+  if is_push {
+    for (byte_number, byte) in rlists.iter().enumerate().rev() {
+      for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
+        if bit_is_set {
+          let bit_number = byte_number * 8 + bit_in_byte;
+          println_maybe!(
+            "pushing bit {}: {:x} ({:x})",
+            byte_number * 8 + bit_in_byte,
+            *get_mut_reg(cpu, bit_number),
+            sp
+          );
+          // Pre//Post offsetting matters if we're storing the base register
+          if is_pre_offseted {
+            operation(&mut sp, 4);
+          }
+          println_maybe!("sp {:x}", sp);
+          let val = *get_mut_reg(cpu, bit_number);
           cpu.write_u32(sp, val);
+          if !is_pre_offseted {
+            operation(&mut sp, 4);
+          }
         }
-        if !is_pre_offseted {
-          operation(&mut sp, 4);
+      }
+    }
+  } else {
+    for (byte_number, byte) in rlists.iter().enumerate() {
+      for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate() {
+        if bit_is_set {
+          let bit_number = byte_number * 8 + bit_in_byte;
+          println_maybe!(
+            "popping bit {}: {:x} ({:x})",
+            byte_number * 8 + bit_in_byte,
+            cpu.fetch_u32(sp),
+            sp
+          );
+          // Pre//Post offsetting matters if we're storing the base register
+          if is_pre_offseted {
+            operation(&mut sp, 4);
+          }
+          println_maybe!("sp {:x}: {:x}", sp, cpu.fetch_u32(sp));
+          *get_mut_reg(cpu, bit_number) = cpu.fetch_u32(sp);
+          if !is_pre_offseted {
+            operation(&mut sp, 4);
+          }
         }
       }
     }
@@ -394,7 +415,6 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
       shift_amount
     };
     let shift_type = ((opcode & 0x0000_0060) >> 5) as u8;
-    dbg!(shift_type);
     let (op2, shift_carry) = if imm_shift_zero {
       // Handle special shift by 0 case
       match shift_type {
@@ -530,7 +550,8 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
     10 => {
       //cmp
       let (res, v) = rn.overflowing_sub(op2);
-      set_all_flags(res, Some(op2 <= rn), Some(v));
+      // set_all_flags(res, Some(op2 <= rn), Some(v));
+      set_all_flags(res, Some(op2 <= rn), Some(false));
     }
     11 => {
       //cmn
@@ -673,7 +694,7 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u32(pc);
   *cpu.pc() += 4;
-  println!("{:x}", opcode);
+  println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
   if check_cond(cpu, opcode) {
     return;
   }

@@ -1,7 +1,10 @@
 /target
 **/*.rs.bk
 /.vscode
+diff.bat
 
+*.log
+log.diff
 *.gba
 *.sav
 instant todos.txt
