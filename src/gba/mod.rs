@@ -3,7 +3,7 @@ mod cpu_mode;
 mod gba;
 mod instructions;
 mod rom;
-mod utils;
+pub mod utils;
 
 /// Wrapper around the GBA emulator struct to prevent dereferencing the Box
 /// Since it's too big for the stack

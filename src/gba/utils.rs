@@ -5,7 +5,7 @@
 /// # Examples
 ///
 /// ```
-/// use rusty_boy_advance::cpu::utils::AsBoolSlice;
+/// use rusty_boy_advance::utils::AsBoolSlice;
 /// fn disassemble(x: u8) -> Option<&'static str> {
 ///   const T: bool = true;
 ///   const F: bool = false;
