@@ -2,11 +2,11 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use super::{cpsr::CPSR, utils::AsBoolSlice, Cpu, CpuMode, SWI_HANDLER};
+use super::super::{cpsr::CPSR, utils::AsBoolSlice, cpu_mode::CpuMode, gba::{GBA, SWI_HANDLER}};
 
 pub type ARMError = String;
 pub type ARMResult = Result<(), ARMError>;
-pub type ARMInstruction = fn(&mut Cpu, u32) -> ARMResult;
+pub type ARMInstruction = fn(&mut GBA, u32) -> ARMResult;
 
 pub(crate) enum Cond {
   /// Equal (Z)
@@ -67,27 +67,27 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
 }
 /// Check if the condition for the given opcode is true
 #[inline]
-pub(crate) fn check_cond(cpu: &mut Cpu, opcode: u32) -> bool {
+pub(crate) fn check_cond(GBA: &mut GBA, opcode: u32) -> bool {
   let applies = match opcode_to_cond(opcode) {
-    Cond::EQ => cpu.cpsr.Z(),
-    Cond::NE => !cpu.cpsr.Z(),
-    Cond::CS_HS => cpu.cpsr.C(),
-    Cond::CC_LO => !cpu.cpsr.C(),
-    Cond::MI => cpu.cpsr.N(),
-    Cond::PL => !cpu.cpsr.N(),
-    Cond::VS => cpu.cpsr.V(),
-    Cond::VC => !cpu.cpsr.V(),
-    Cond::HI => cpu.cpsr.C() && !cpu.cpsr.Z(),
-    Cond::LS => !cpu.cpsr.C() || cpu.cpsr.Z(),
-    Cond::GE => cpu.cpsr.N() == cpu.cpsr.V(),
-    Cond::LT => cpu.cpsr.N() != cpu.cpsr.V(),
-    Cond::GT => cpu.cpsr.N() == cpu.cpsr.V() && !cpu.cpsr.Z(),
-    Cond::LE => cpu.cpsr.N() != cpu.cpsr.V() && cpu.cpsr.Z(),
+    Cond::EQ => GBA.cpsr.Z(),
+    Cond::NE => !GBA.cpsr.Z(),
+    Cond::CS_HS => GBA.cpsr.C(),
+    Cond::CC_LO => !GBA.cpsr.C(),
+    Cond::MI => GBA.cpsr.N(),
+    Cond::PL => !GBA.cpsr.N(),
+    Cond::VS => GBA.cpsr.V(),
+    Cond::VC => !GBA.cpsr.V(),
+    Cond::HI => GBA.cpsr.C() && !GBA.cpsr.Z(),
+    Cond::LS => !GBA.cpsr.C() || GBA.cpsr.Z(),
+    Cond::GE => GBA.cpsr.N() == GBA.cpsr.V(),
+    Cond::LT => GBA.cpsr.N() != GBA.cpsr.V(),
+    Cond::GT => GBA.cpsr.N() == GBA.cpsr.V() && !GBA.cpsr.Z(),
+    Cond::LE => GBA.cpsr.N() != GBA.cpsr.V() && GBA.cpsr.Z(),
     Cond::AL => true,
     Cond::NV => false,
   };
   if applies {
-    cpu.clocks += 1;
+    GBA.clocks += 1;
   }
   !applies
 }
@@ -129,34 +129,34 @@ fn as_extra_flag(opcode: u32) -> bool {
 }
 /// Branch and Exchange
 /// If the condition is true, branch and switch mode
-fn BX(cpu: &mut Cpu, opcode: u32) -> ARMResult {
-  cpu.clocks += 3; // TODO: Clocks
+fn BX(GBA: &mut GBA, opcode: u32) -> ARMResult {
+  GBA.clocks += 3; // TODO: Clocks
                    // Address to jump to is in a register given by lowest nibble
   let reg_n = opcode & 0x0000_000F;
-  let mut jmp_addr = cpu.regs[reg_n as usize];
+  let mut jmp_addr = GBA.regs[reg_n as usize];
   // It doesn't *actually* switch mode, a bit tells us what to set it to
   let switch_to_thumb = (jmp_addr & 0x0000_0001) != 0;
   if switch_to_thumb {
     jmp_addr -= 1;
-    cpu.cpsr.set_T(true);
+    GBA.cpsr.set_T(true);
   }
-  *cpu.pc() = jmp_addr;
+  *GBA.pc() = jmp_addr;
   Ok(())
 }
 /// Branch or Branch and link
 ///
 /// BL is similar to CALL, it stores the return PC (PC+4) in the
 /// LR (Register 14). If using nested functions, that requires pushing LR onto the stack.
-fn B(cpu: &mut Cpu, opcode: u32) -> ARMResult {
-  cpu.clocks += 3; // TODO: Clocks
+fn B(GBA: &mut GBA, opcode: u32) -> ARMResult {
+  GBA.clocks += 3; // TODO: Clocks
   let offset = (opcode & 0x007F_FFFF) << 2; //*4
   let is_positive = (opcode & 0x0080_0000) == 0;
   let is_branch_and_link = (opcode & 0x0100_0000) != 0;
-  let pc = cpu.regs[15];
+  let pc = GBA.regs[15];
   if is_branch_and_link {
-    *cpu.LR() = pc;
+    *GBA.LR() = pc;
   }
-  cpu.regs[15] = 4u32
+  GBA.regs[15] = 4u32
     .overflowing_add(if is_positive {
       pc.overflowing_add(offset).0
     } else {
@@ -168,16 +168,16 @@ fn B(cpu: &mut Cpu, opcode: u32) -> ARMResult {
 /// Software Interrupt
 ///
 /// Used to call BIOS functions
-pub(crate) fn SWI(cpu: &mut Cpu, _: u32) -> ARMResult {
-  cpu.set_mode(CpuMode::Supervisor);
-  *cpu.pc() = SWI_HANDLER;
-  cpu.cpsr.set_T(false); // Set ARM state
-  cpu.cpsr.set_I(true);
-  cpu.clocks += 0; // todo:clocks
+pub(crate) fn SWI(GBA: &mut GBA, _: u32) -> ARMResult {
+  GBA.set_mode(CpuMode::Supervisor);
+  *GBA.pc() = SWI_HANDLER;
+  GBA.cpsr.set_T(false); // Set ARM state
+  GBA.cpsr.set_I(true);
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Single data swap
-fn SWP(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn SWP(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, is_byte_else_word, _, _) = as_flags(opcode);
   let (rn, rd, _, _, rm) = as_usize_nibbles(opcode);
   if is_byte_else_word {
@@ -186,80 +186,80 @@ fn SWP(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     // It refers to STR/LDR, which says
     // "When reading a byte from memory, upper 24 bits of Rd are zero-extended."
     // I'm assuming that literally means the upper bits and not the most significant ones
-    *cpu.reg_mut(rd) = (*cpu.reg_mut(rn)) & 0x0000_00FF;
-    *cpu.reg_mut(rn) = (*cpu.reg_mut(rm)) & 0x0000_00FF;
+    *GBA.reg_mut(rd) = (*GBA.reg_mut(rn)) & 0x0000_00FF;
+    *GBA.reg_mut(rn) = (*GBA.reg_mut(rm)) & 0x0000_00FF;
   } else {
-    *cpu.reg_mut(rd) = *cpu.reg_mut(rn);
-    *cpu.reg_mut(rn) = *cpu.reg_mut(rm);
+    *GBA.reg_mut(rd) = *GBA.reg_mut(rn);
+    *GBA.reg_mut(rn) = *GBA.reg_mut(rm);
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Multiply long
-fn MULL(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn MULL(GBA: &mut GBA, opcode: u32) -> ARMResult {
   //TODO: Accumulate?
   let (_, _, signed, accumulate, set_cond_flags) = as_flags(opcode);
   let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
   let res: u64 = if signed {
     return Err(String::from("No support for signed long multiplication"));
   } else {
-    u64::from(cpu.fetch_reg(rn)) * u64::from(cpu.fetch_reg(rm))
+    u64::from(GBA.fetch_reg(rn)) * u64::from(GBA.fetch_reg(rm))
   };
-  *cpu.reg_mut(rdhigh) = (res) as u32;
-  *cpu.reg_mut(rdlow) = (res >> 32) as u32;
+  *GBA.reg_mut(rdhigh) = (res) as u32;
+  *GBA.reg_mut(rdlow) = (res >> 32) as u32;
   if set_cond_flags {
     // TODO: Are Z and N set using the 64bit value
     // or just the upper word or lower word?
-    cpu.cpsr.set_Z(res == 0);
-    cpu.cpsr.set_N((res & 0x8000_0000_0000_0000) != 0);
-    cpu.cpsr.set_C(false); //C=destroyed (ARMv4 and below)
+    GBA.cpsr.set_Z(res == 0);
+    GBA.cpsr.set_N((res & 0x8000_0000_0000_0000) != 0);
+    GBA.cpsr.set_C(false); //C=destroyed (ARMv4 and below)
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Multiply
-fn MUL(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn MUL(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
-    cpu.fetch_reg(rn).overflowing_mul(cpu.fetch_reg(rm)).0.overflowing_add(cpu.fetch_reg(rd)).0
+    GBA.fetch_reg(rn).overflowing_mul(GBA.fetch_reg(rm)).0.overflowing_add(GBA.fetch_reg(rd)).0
   } else {
-    cpu.fetch_reg(rn).overflowing_mul(cpu.fetch_reg(rm)).0
+    GBA.fetch_reg(rn).overflowing_mul(GBA.fetch_reg(rm)).0
   };
-  *cpu.reg_mut(rs) = res;
+  *GBA.reg_mut(rs) = res;
   if set_cond_flags {
     //C=destroyed (ARMv4 and below)
-    cpu.cpsr.set_all_status_flags(res, Some(false), None);
+    GBA.cpsr.set_all_status_flags(res, Some(false), None);
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Halfword Data Transfer Register Offset
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_RO(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn HDT_RO(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, _, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
   let h = (sh & 0b0010) != 0;
   // TODO: the thing
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   unimplemented!()
 }
 // Halfword Data Transfer Immediate Offset
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_IO(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn HDT_IO(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, offset, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
   let h = (sh & 0b0010) != 0;
   // TODO: the thing
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   unimplemented!()
 }
 /// Single Data Transfer
-fn SDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn SDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
@@ -268,7 +268,7 @@ fn SDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   } else {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = second_byte;
-    let register_value = cpu.regs[first_byte];
+    let register_value = GBA.regs[first_byte];
     match shift_type & 6 {
       0 => register_value.overflowing_shl(shift_amount).0,
       2 => register_value.overflowing_shr(shift_amount).0,
@@ -283,58 +283,58 @@ fn SDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     }
   };
   let mut addr =
-    (i64::from(cpu.regs[rn]) + if is_up { i64::from(offset) } else { -i64::from(offset) }) as u32;
+    (i64::from(GBA.regs[rn]) + if is_up { i64::from(offset) } else { -i64::from(offset) }) as u32;
   if rn == 15 {
     addr += 4;
   }
   if is_load {
-    cpu.regs[rd] = if is_byte_size {
+    GBA.regs[rd] = if is_byte_size {
       // Least significant byte
-      u32::from(cpu.fetch_byte(((addr) / 4u32) * 4u32))
+      u32::from(GBA.fetch_byte(((addr) / 4u32) * 4u32))
     } else {
-      cpu.fetch_u32(addr)
+      GBA.fetch_u32(addr)
     };
   } else if is_byte_size {
-    cpu.write_u8(addr, cpu.regs[rd] as u8);
+    GBA.write_u8(addr, GBA.regs[rd] as u8);
   } else {
-    cpu.write_u32(addr, cpu.regs[rd]);
+    GBA.write_u32(addr, GBA.regs[rd]);
   }
   if !is_pre_offseted || bit_21 {
-    cpu.regs[rn] = addr;
+    GBA.regs[rn] = addr;
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Block Data Transfer
-fn BDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn BDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) = as_flags(opcode);
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
   let (rlist2, rlist1) = (((opcode & 0x0000_FF00) >> 8) as u8, (opcode & 0x0000_00FF) as u8);
   let rlists = [rlist1, rlist2];
   // TODO: Should that be (rlist1 & 0x1) ?
   let is_psr = psr_or_user_mode && is_load_else_store && ((rlist2 & 0x80) != 0);
-  let get_mut_reg: fn(&mut Cpu, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
+  let get_mut_reg: fn(&mut GBA, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
     // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
     // "You must not use it in User mode or System mode.". How strict is that requirement?
-    |cpu, x| match x {
-      0..=7 => &mut cpu.regs[x],
+    |GBA, x| match x {
+      0..=7 => &mut GBA.regs[x],
       8..=12 => {
-        if cpu.cpsr.mode() == CpuMode::FIQ {
-          &mut cpu.fiq_only_banks[0][x - 8]
+        if GBA.cpsr.mode() == CpuMode::FIQ {
+          &mut GBA.fiq_only_banks[0][x - 8]
         } else {
-          &mut cpu.regs[x]
+          &mut GBA.regs[x]
         }
       }
-      13..=15 => &mut cpu.all_modes_banks[CpuMode::User.as_usize()][x - 13],
+      13..=15 => &mut GBA.all_modes_banks[CpuMode::User.as_usize()][x - 13],
       _ => unimplemented!(
         "This should never happen. Attempt to access an invalid register number ({})",
         x
       ),
     }
   } else {
-    |cpu, x| &mut cpu.regs[x]
+    |GBA, x| &mut GBA.regs[x]
   };
-  let mut sp = *get_mut_reg(cpu, rn);
+  let mut sp = *get_mut_reg(GBA, rn);
   let operation: fn(&mut u32, u32) = if !is_up {
     |sp, offset| {
       *sp -= offset;
@@ -351,19 +351,12 @@ fn BDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
         if bit_is_set {
           let bit_number = byte_number * 8 + bit_in_byte;
-          println_maybe!(
-            "pushing bit {}: {:x} ({:x})",
-            byte_number * 8 + bit_in_byte,
-            *get_mut_reg(cpu, bit_number),
-            sp
-          );
           // Pre//Post offsetting matters if we're storing the base register
           if is_pre_offseted {
             operation(&mut sp, 4);
           }
-          println_maybe!("sp {:x}", sp);
-          let val = *get_mut_reg(cpu, bit_number);
-          cpu.write_u32(sp, val);
+          let val = *get_mut_reg(GBA, bit_number);
+          GBA.write_u32(sp, val);
           if !is_pre_offseted {
             operation(&mut sp, 4);
           }
@@ -375,18 +368,11 @@ fn BDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate() {
         if bit_is_set {
           let bit_number = byte_number * 8 + bit_in_byte;
-          println_maybe!(
-            "popping bit {}: {:x} ({:x})",
-            byte_number * 8 + bit_in_byte,
-            cpu.fetch_u32(sp),
-            sp
-          );
           // Pre//Post offsetting matters if we're storing the base register
           if is_pre_offseted {
             operation(&mut sp, 4);
           }
-          println_maybe!("sp {:x}: {:x}", sp, cpu.fetch_u32(sp));
-          *get_mut_reg(cpu, bit_number) = cpu.fetch_u32(sp);
+          *get_mut_reg(GBA, bit_number) = GBA.fetch_u32(sp);
           if !is_pre_offseted {
             operation(&mut sp, 4);
           }
@@ -395,24 +381,24 @@ fn BDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     }
   }
   if write_back {
-    *get_mut_reg(cpu, rn) = sp;
+    *get_mut_reg(GBA, rn) = sp;
   }
   if is_psr {
-    cpu.cpsr = *cpu
+    GBA.cpsr = *GBA
       .get_spsr_mut()
       .ok_or("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode")?;
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Data Processing or PSR transfer
 /// This handles all ALU operations
-fn ALU(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn ALU(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let immediate = as_extra_flag(opcode);
   let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
   let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
   let set_condition_flags = (opcode & 0x0010_0000) != 0 || rd == 15;
-  let mut rn = cpu.regs[rn_num];
+  let mut rn = GBA.regs[rn_num];
   if rn_num == 15 {
     rn = rn.overflowing_add(4).0; // Account for PC pipelining
   }
@@ -422,11 +408,11 @@ fn ALU(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     let val = u32::from(lowest_byte + second_byte * 16);
     (val.rotate_right(ror_shift), Some((val & (1u32 << ror_shift)) != 0))
   } else {
-    let register_value: u32 = cpu.regs[lowest_byte as usize];
+    let register_value: u32 = GBA.regs[lowest_byte as usize];
     let shift_by_register = (opcode & 0x0000_0010) != 0;
     let mut imm_shift_zero = false;
     let shift_amount = if shift_by_register {
-      (cpu.regs[third_byte as usize] & 0x0000_000F)
+      (GBA.regs[third_byte as usize] & 0x0000_000F)
         .overflowing_add(if third_byte == 15 { 4 } else { 0 })
         .0
     } else {
@@ -487,9 +473,9 @@ fn ALU(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     };
     (op2, if lowest_byte == 0 { None } else { shift_carry })
   };
-  let res = &mut cpu.regs[rd];
-  let cpsr = cpu.cpsr;
-  let ref_cpsr = &mut cpu.cpsr;
+  let res = &mut GBA.regs[rd];
+  let cpsr = GBA.cpsr;
+  let ref_cpsr = &mut GBA.cpsr;
   let mut set_all_flags = move |res: u32, carry: Option<bool>, overflow: Option<bool>| {
     if set_condition_flags {
       ref_cpsr.set_all_status_flags(res, carry, overflow);
@@ -600,11 +586,11 @@ fn ALU(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     }
     _ => unimplemented!("Impossible. We AND'ed 4 bits, there are 16 posibilities"),
   }
-  cpu.clocks += 0; // todo:clocks
+  GBA.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Move to Status Register
-fn MSR(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn MSR(GBA: &mut GBA, opcode: u32) -> ARMResult {
   const FLAGS_MASK: u32 = 0xFF00_0000;
   const STATE_MASK: u32 = 0x0000_0020;
   const PRIVACY_MASK: u32 = 0x0000_00CF;
@@ -616,13 +602,13 @@ fn MSR(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     let (_, _, shift, second, first) = as_u8_nibbles(opcode);
     (u32::from(first) + u32::from(second) * 16).rotate_right(2 * u32::from(shift))
   } else {
-    cpu.regs[(opcode & 0x0000_000F) as usize]
+    GBA.regs[(opcode & 0x0000_000F) as usize]
   };
 
-  let current_mode = cpu.cpsr.mode();
+  let current_mode = GBA.cpsr.mode();
   if use_spsr {
     // If modifying the spsr we can directly modify it
-    let spsr = cpu.get_spsr_mut().ok_or("")?;
+    let spsr = GBA.get_spsr_mut().ok_or("")?;
     let old = spsr.0;
     let mut valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
       | (if change_flags_fields { FLAGS_MASK } else { 0 });
@@ -632,47 +618,47 @@ fn MSR(cpu: &mut Cpu, opcode: u32) -> ARMResult {
     // mode has no spsr
     *spsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
   } else {
-    // If modifying the cpsr, we must call the cpu's set_mode
+    // If modifying the cpsr, we must call the GBA's set_mode
     // to change banks if necessary
-    let old = cpu.cpsr.0;
+    let old = GBA.cpsr.0;
     let valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
       | (if change_flags_fields { FLAGS_MASK } else { 0 });
     let invalid_bits_mask = !valid_bits_mask;
-    cpu.cpsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
+    GBA.cpsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
     if current_mode != CpuMode::User && change_control_fields {
-      cpu.set_mode(CpuMode::from_byte(((operand & 0x0000_000F) | 0x0000_0010) as u8));
-      cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
+      GBA.set_mode(CpuMode::from_byte(((operand & 0x0000_000F) | 0x0000_0010) as u8));
+      GBA.cpsr = CPSR((GBA.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
     }
   };
   Ok(())
 }
 /// Move to register from status register
-fn MRS(cpu: &mut Cpu, opcode: u32) -> ARMResult {
+fn MRS(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, use_spsr, _, _) = as_flags(opcode);
-  cpu.regs[((opcode & 0x0000_F000) >> 12) as usize] = if use_spsr {
-    cpu
+  GBA.regs[((opcode & 0x0000_F000) >> 12) as usize] = if use_spsr {
+    GBA
       .get_spsr_mut()
       .ok_or("Cannot use ^(PSR) on arm MRS while in User or Priviledged(System) mode")?
       .0
   } else {
-    cpu.cpsr.0
+    GBA.cpsr.0
   };
   Ok(())
 }
 /// Coprocessor Data Transfer (Unimplemented)
-fn CDT(_: &mut Cpu, _: u32) -> ARMResult {
+fn CDT(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Data Operation (Unimplemented)
-fn CDO(_: &mut Cpu, _: u32) -> ARMResult {
+fn CDO(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Register Transfer (Unimplemented)
-fn CRT(_: &mut Cpu, _: u32) -> ARMResult {
+fn CRT(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 
-/// Map an opcode to an instruction (An fn(&mut Cpu, u32))
+/// Map an opcode to an instruction (An fn(&mut GBA, u32))
 ///
 /// Panics on undefined or invalid opcode.
 fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
@@ -711,15 +697,15 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
   })
 }
 
-pub(crate) fn execute_one_instruction(cpu: &mut Cpu) -> ARMResult {
-  let pc = *cpu.pc();
-  let opcode = cpu.fetch_u32(pc);
-  *cpu.pc() += 4;
-  (cpu.instruction_hook_with_opcode)(cpu, opcode);
-  if check_cond(cpu, opcode) {
+pub(crate) fn execute_one_instruction(GBA: &mut GBA) -> ARMResult {
+  let pc = *GBA.pc();
+  let opcode = GBA.fetch_u32(pc);
+  *GBA.pc() += 4;
+  (GBA.instruction_hook_with_opcode)(GBA, opcode);
+  if check_cond(GBA, opcode) {
     return Ok(());
   }
   let instruction = decode_arm(opcode)?;
-  instruction(cpu, opcode)?;
+  instruction(GBA, opcode)?;
   Ok(())
 }

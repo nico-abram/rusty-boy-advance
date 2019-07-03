@@ -4,7 +4,7 @@
 
 use clap::{App, Arg};
 
-mod cpu;
+mod gba;
 mod renderer;
 
 #[allow(clippy::expect_fun_call)]
@@ -82,15 +82,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let mut cpu = {
     let log_level = match log_level {
-      0 => cpu::LogLevel::None,
-      1 => cpu::LogLevel::NormalizedEveryInstruction,
-      2 => cpu::LogLevel::Debug,
+      0 => gba::LogLevel::None,
+      1 => gba::LogLevel::NormalizedEveryInstruction,
+      2 => gba::LogLevel::Debug,
       _ => unimplemented!(), // Clap ensures this doesnt happen
     };
     let bios_file = bios_file_name_option.map(|rom_filename| {
       std::fs::read(rom_filename).expect(format!("BIOS file {} not found", rom_filename).as_str())
     });
-    let mut cpu = cpu::Cpu::new(log_level, bios_file.as_ref().map(|v| &v[..]));
+    let mut cpu = gba::GBA::new(log_level, bios_file.as_ref().map(|v| &v[..]));
     let rom_file = std::fs::File::open(rom_filename)
       .expect(format!("ROM file {} not found", rom_filename).as_str());
     let rom_file_reader = std::io::BufReader::new(rom_file);

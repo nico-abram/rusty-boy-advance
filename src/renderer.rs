@@ -1,8 +1,8 @@
-use crate::cpu::Cpu;
+use crate::gba::GBA;
 use beryllium::*;
 
 #[allow(clippy::unneeded_field_pattern)]
-pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(cpu: &mut GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
   let sdl = unsafe { beryllium::init() }?;
   let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT32_DEFAULT)?;

@@ -1,4 +1,4 @@
 #![feature(box_syntax)]
 #![feature(test)]
 
-pub mod cpu;
+pub mod gba;

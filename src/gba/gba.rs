@@ -9,14 +9,12 @@ macro_rules! println_maybe {
     //println!($($arg)*);
   }};
 }
-mod arm;
-mod cpsr;
-mod cpu_mode;
-mod thumb;
-pub mod utils;
 
+use super::{cpsr, cpu_mode, instructions, rom};
 use cpsr::CPSR;
 use cpu_mode::CpuMode;
+use instructions::{arm, thumb};
+use rom::Rom;
 
 const KB: usize = 1024;
 const MB: usize = KB * KB;
@@ -60,7 +58,7 @@ impl std::error::Error for GBAError {
     self.as_string()
   }
 }
-pub struct Cpu {
+pub struct GBA {
   //// Output image
   pub output_texture: [u32; 240 * 160],
   /// Current registers. Swapped on mode change acordingly.
@@ -89,24 +87,25 @@ pub struct Cpu {
   oam: [u8; KB],
   io_mem: [u8; 1022],
   pub(crate) clocks: u32,
-  instruction_hook: fn(&mut Cpu),
-  instruction_hook_with_opcode: fn(&mut Cpu, u32),
+  instruction_hook: fn(&mut GBA),
+  pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
+  loaded_rom: Option<Rom>,
 }
-impl Cpu {
+impl GBA {
   pub fn new(log_level: LogLevel, bios_file: std::option::Option<&[u8]>) -> Box<Self> {
-    fn nothing(_: &mut Cpu) {}
-    fn nothing_with_opcode(_: &mut Cpu, _: u32) {}
-    fn print_opcode(_: &mut Cpu, opcode: u32) {
+    fn nothing(_: &mut GBA) {}
+    fn nothing_with_opcode(_: &mut GBA, _: u32) {}
+    fn print_opcode(_: &mut GBA, opcode: u32) {
       println!("opcode {}:{:x}", unsafe { COUNT }, opcode);
     }
-    fn print_state_normalized(cpu: &mut Cpu) {
-      println!("{}", cpu.state_as_string_without_pc());
+    fn print_state_normalized(GBA: &mut GBA) {
+      println!("{}", GBA.state_as_string_without_pc());
     }
-    fn print_state(cpu: &mut Cpu) {
-      println!("{}", cpu.state_as_string());
+    fn print_state(GBA: &mut GBA) {
+      println!("{}", GBA.state_as_string());
     }
     // Was still getting stack overflows without box X
-    let mut cpu = box Cpu {
+    let mut GBA = box GBA {
       output_texture: [0u32; 240 * 160],
       regs: [0u32; 16],
       fiq_only_banks: [[0u32; 5]; 2],
@@ -122,6 +121,7 @@ impl Cpu {
       io_mem: [0u8; 1022],
       game_pak: [0u8; 64 * KB],
       clocks: 0u32,
+      loaded_rom: None,
       instruction_hook: match log_level {
         LogLevel::Debug => print_state,
         LogLevel::NormalizedEveryInstruction => print_state_normalized,
@@ -133,10 +133,10 @@ impl Cpu {
         LogLevel::None => nothing_with_opcode,
       },
     };
-    cpu.reset();
+    GBA.reset();
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
-    cpu.bios_rom.clone_from_slice(bios_file);
-    cpu
+    GBA.bios_rom.clone_from_slice(bios_file);
+    GBA
   }
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
     let mode = self.cpsr.mode();
@@ -223,7 +223,7 @@ impl Cpu {
       _ => unimplemented!("Invalid address: {:x}", addr),
     }
   }
-  /// The GBA cpu always runs in LE mode
+  /// The GBA GBA always runs in LE mode
   pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
     let addr = addr as usize;
     match addr {
@@ -328,11 +328,11 @@ impl Cpu {
       if let Some(idx) = title.iter().position(|x| *x == 0) { &title[0..idx] } else { title };
     let title = String::from_utf8(title.to_vec())?;
     let code = &buf[0x00AC..0x00B0];
-    //dbg!(std::str::from_utf8(code).unwrap());
+    let code = String::from_utf8(code.to_vec())?;
     for (input, out) in buf.iter().zip(self.game_pak.iter_mut()) {
       *out = *input;
     }
-    println_maybe!("Running rom '{}' (Code: {})", title, String::from_utf8(code.to_vec())?);
+    self.loaded_rom = Some(Rom::new(buf, title, code));
     Ok(())
   }
   pub(crate) fn thumb(&mut self) -> bool {
