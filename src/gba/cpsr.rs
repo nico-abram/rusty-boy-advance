@@ -24,74 +24,74 @@ impl CPSR {
   fn set(&mut self, bit: u32, set_it_to_true: bool) {
     self.0 = (self.0 & (!bit)) | (if set_it_to_true { bit } else { 0 });
   }
-  /// Sign(Negative)
+  /// Sign(Negative) (N)
   #[inline]
-  pub(crate) fn N(self) -> bool {
+  pub(crate) fn negative_flag(self) -> bool {
     self.is_set(0x8000_0000)
   }
-  /// Sign(Negative)
+  /// Sign(Negative) (N)
   #[inline]
-  pub(crate) fn set_N(&mut self, v: bool) {
+  pub(crate) fn set_negative_flag(&mut self, v: bool) {
     self.set(0x8000_0000, v)
   }
-  /// Zero
+  /// Zero (Z)
   #[inline]
-  pub(crate) fn Z(self) -> bool {
+  pub(crate) fn zero_flag(self) -> bool {
     self.is_set(0x4000_0000)
   }
-  /// Zero
+  /// Zero (Z)
   #[inline]
-  pub(crate) fn set_Z(&mut self, v: bool) {
+  pub(crate) fn set_zero_flag(&mut self, v: bool) {
     self.set(0x4000_0000, v)
   }
-  /// Carry
+  /// Carry (C)
   #[inline]
-  pub(crate) fn C(self) -> bool {
+  pub(crate) fn carry_flag(self) -> bool {
     self.is_set(0x2000_0000)
   }
-  /// Carry
+  /// Carry (C)
   #[inline]
-  pub(crate) fn set_C(&mut self, v: bool) {
+  pub(crate) fn set_carry_flag(&mut self, v: bool) {
     self.set(0x2000_0000, v)
   }
-  /// Overflow
+  /// Overflow (V)
   #[inline]
-  pub(crate) fn V(self) -> bool {
+  pub(crate) fn overflow_flag(self) -> bool {
     self.is_set(0x1000_0000)
   }
-  /// Overflow
+  /// Overflow (V)
   #[inline]
-  pub(crate) fn set_V(&mut self, v: bool) {
+  pub(crate) fn set_overflow_flag(&mut self, v: bool) {
     self.set(0x1000_0000, v)
   }
-  /// IRQ disabled
+  /// IRQ disabled (I)
   #[inline]
-  pub(crate) fn I(self) -> bool {
+  pub(crate) fn irq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0080)
   }
-  /// Disable IRQ
+  /// Disable IRQ (I)
   #[inline]
-  pub(crate) fn set_I(&mut self, v: bool) {
+  pub(crate) fn set_irq_disabled_flag(&mut self, v: bool) {
     self.set(0x0000_0080, v)
   }
-  /// Fiq disabled
+  /// Fiq disabled (F)
   #[inline]
-  pub(crate) fn F(self) -> bool {
+  pub(crate) fn fiq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0040)
   }
-  /// Disable Fiq
+  /// Disable Fiq (F)
   #[inline]
-  pub(crate) fn set_F(&mut self, v: bool) {
+  pub(crate) fn set_fiq_disabled_flag(&mut self, v: bool) {
     self.set(0x0000_0040, v)
   }
   /// State/Thumb (thumb=1/true)
   #[inline]
-  pub(crate) fn T(self) -> bool {
+  pub(crate) fn thumb_state_flag(self) -> bool {
     self.is_set(0x0000_0020)
   }
   /// State/Thumb (thumb=1/true)
   #[inline]
-  pub(crate) fn set_T(&mut self, v: bool) {
+  pub(crate) fn set_thumb_state_flag(&mut self, v: bool) {
     self.set(0x0000_0020, v)
   }
   /// Get priviledge mode
@@ -127,8 +127,8 @@ impl CPSR {
   }
   #[inline]
   pub(crate) fn set_neutral_flags(&mut self, res: u32) {
-    self.set_N((res & 0x8000_0000) != 0);
-    self.set_Z(res == 0x0000_0000);
+    self.set_negative_flag((res & 0x8000_0000) != 0);
+    self.set_zero_flag(res == 0x0000_0000);
   }
   #[inline]
   pub(crate) fn set_all_status_flags(
@@ -138,10 +138,10 @@ impl CPSR {
     overflow: Option<bool>,
   ) {
     if let Some(carry) = carry {
-      self.set_C(carry);
+      self.set_carry_flag(carry);
     }
     if let Some(overflow) = overflow {
-      self.set_V(overflow);
+      self.set_overflow_flag(overflow);
     }
     self.set_neutral_flags(res);
   }
@@ -151,13 +151,13 @@ impl std::fmt::Display for CPSR {
     write!(
       f,
       "N:{} C:{} Z:{} V:{} I:{} F:{} T:{} mode:{:x?}",
-      self.N(),
-      self.C(),
-      self.Z(),
-      self.V(),
-      self.I(),
-      self.F(),
-      self.T(),
+      self.negative_flag(),
+      self.carry_flag(),
+      self.zero_flag(),
+      self.overflow_flag(),
+      self.irq_disabled_flag(),
+      self.fiq_disabled_flag(),
+      self.thumb_state_flag(),
       self.mode().as_byte()
     )
   }

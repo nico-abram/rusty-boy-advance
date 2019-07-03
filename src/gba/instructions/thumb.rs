@@ -200,22 +200,22 @@ fn alu_operation(GBA: &mut GBA, opcode: u16) -> ThumbResult {
     0x5 => {
       // ADC (Add With Carry)
       let (result, overflow) = rd_val.overflowing_add(rs_val);
-      let (result, overflow2) = result.overflowing_add(GBA.cpsr.C() as u32);
+      let (result, overflow2) = result.overflowing_add(GBA.cpsr.carry_flag() as u32);
       GBA.regs[rd] = result;
       GBA.cpsr.set_all_status_flags(
         result,
-        Some(carry_from(rd_val, rs_val + (GBA.cpsr.C() as u32), result)), // TODO: Account for overflow in rs+C
+        Some(carry_from(rd_val, rs_val + (GBA.cpsr.carry_flag() as u32), result)), // TODO: Account for overflow in rs+C
         Some(overflow || overflow2),
       );
     }
     0x6 => {
       // SBC (Substract With Carry)
       let (result, overflow) = rd_val.overflowing_sub(rs_val);
-      let (result, overflow2) = result.overflowing_sub((!GBA.cpsr.C()) as u32);
+      let (result, overflow2) = result.overflowing_sub((!GBA.cpsr.carry_flag()) as u32);
       GBA.regs[rd] = result;
       GBA.cpsr.set_all_status_flags(
         result,
-        Some(borrow_from(rd_val, rs_val.overflowing_add((!GBA.cpsr.C()) as u32).0) || overflow2),
+        Some(borrow_from(rd_val, rs_val.overflowing_add((!GBA.cpsr.carry_flag()) as u32).0) || overflow2),
         Some(overflow || overflow2),
       );
     }
@@ -232,7 +232,7 @@ fn alu_operation(GBA: &mut GBA, opcode: u16) -> ThumbResult {
           GBA.cpsr.set_all_status_flags(result, Some(((rd_val >> (r4 - 1)) & 1) != 0), None);
         } else {
           GBA.cpsr.set_neutral_flags(rd_val);
-          GBA.cpsr.set_C((rd_val >> 31) != 0);
+          GBA.cpsr.set_carry_flag((rd_val >> 31) != 0);
         }
       }
     }
@@ -315,7 +315,7 @@ fn high_register_operations_or_bx(GBA: &mut GBA, opcode: u16) -> ThumbResult {
       // BX
       // Change to ARM mode if bit 0 is 0
       let rs_val = GBA.regs[rs];
-      GBA.cpsr.set_T((rs_val & 0x0000_0001) != 0);
+      GBA.cpsr.set_thumb_state_flag((rs_val & 0x0000_0001) != 0);
       if rs == 15 {
         GBA.regs[15] = rs_val & 0xFFFF_FFFC;
       } else {
@@ -541,7 +541,7 @@ fn conditional_branch(GBA: &mut GBA, opcode: u16) -> ThumbResult {
 }
 /// SWI
 fn software_interrupt(GBA: &mut GBA, opcode: u16) -> ThumbResult {
-  super::arm::SWI(GBA, u32::from(opcode) << 16)?;
+  super::arm::software_interrupt(GBA, u32::from(opcode) << 16)?;
   GBA.clocks += 0; // TODO: clocks
   Ok(())
 }

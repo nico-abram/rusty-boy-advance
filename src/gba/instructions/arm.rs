@@ -69,20 +69,20 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
 #[inline]
 pub(crate) fn check_cond(GBA: &mut GBA, opcode: u32) -> bool {
   let applies = match opcode_to_cond(opcode) {
-    Cond::EQ => GBA.cpsr.Z(),
-    Cond::NE => !GBA.cpsr.Z(),
-    Cond::CS_HS => GBA.cpsr.C(),
-    Cond::CC_LO => !GBA.cpsr.C(),
-    Cond::MI => GBA.cpsr.N(),
-    Cond::PL => !GBA.cpsr.N(),
-    Cond::VS => GBA.cpsr.V(),
-    Cond::VC => !GBA.cpsr.V(),
-    Cond::HI => GBA.cpsr.C() && !GBA.cpsr.Z(),
-    Cond::LS => !GBA.cpsr.C() || GBA.cpsr.Z(),
-    Cond::GE => GBA.cpsr.N() == GBA.cpsr.V(),
-    Cond::LT => GBA.cpsr.N() != GBA.cpsr.V(),
-    Cond::GT => GBA.cpsr.N() == GBA.cpsr.V() && !GBA.cpsr.Z(),
-    Cond::LE => GBA.cpsr.N() != GBA.cpsr.V() && GBA.cpsr.Z(),
+    Cond::EQ => GBA.cpsr.zero_flag(),
+    Cond::NE => !GBA.cpsr.zero_flag(),
+    Cond::CS_HS => GBA.cpsr.carry_flag(),
+    Cond::CC_LO => !GBA.cpsr.carry_flag(),
+    Cond::MI => GBA.cpsr.negative_flag(),
+    Cond::PL => !GBA.cpsr.negative_flag(),
+    Cond::VS => GBA.cpsr.overflow_flag(),
+    Cond::VC => !GBA.cpsr.overflow_flag(),
+    Cond::HI => GBA.cpsr.carry_flag() && !GBA.cpsr.zero_flag(),
+    Cond::LS => !GBA.cpsr.carry_flag() || GBA.cpsr.zero_flag(),
+    Cond::GE => GBA.cpsr.negative_flag() == GBA.cpsr.overflow_flag(),
+    Cond::LT => GBA.cpsr.negative_flag() != GBA.cpsr.overflow_flag(),
+    Cond::GT => GBA.cpsr.negative_flag() == GBA.cpsr.overflow_flag() && !GBA.cpsr.zero_flag(),
+    Cond::LE => GBA.cpsr.negative_flag() != GBA.cpsr.overflow_flag() && GBA.cpsr.zero_flag(),
     Cond::AL => true,
     Cond::NV => false,
   };
@@ -138,7 +138,7 @@ fn BX(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let switch_to_thumb = (jmp_addr & 0x0000_0001) != 0;
   if switch_to_thumb {
     jmp_addr -= 1;
-    GBA.cpsr.set_T(true);
+    GBA.cpsr.set_thumb_state_flag(true);
   }
   *GBA.pc() = jmp_addr;
   Ok(())
@@ -165,14 +165,14 @@ fn B(GBA: &mut GBA, opcode: u32) -> ARMResult {
     .0;
   Ok(())
 }
-/// Software Interrupt
+/// Software Interrupt (SWI)
 ///
 /// Used to call BIOS functions
-pub(crate) fn SWI(GBA: &mut GBA, _: u32) -> ARMResult {
+pub(crate) fn software_interrupt(GBA: &mut GBA, _: u32) -> ARMResult {
   GBA.set_mode(CpuMode::Supervisor);
   *GBA.pc() = SWI_HANDLER;
-  GBA.cpsr.set_T(false); // Set ARM state
-  GBA.cpsr.set_I(true);
+  GBA.cpsr.set_thumb_state_flag(false); // Set ARM state
+  GBA.cpsr.set_irq_disabled_flag(true);
   GBA.clocks += 0; // todo:clocks
   Ok(())
 }
@@ -210,9 +210,9 @@ fn MULL(GBA: &mut GBA, opcode: u32) -> ARMResult {
   if set_cond_flags {
     // TODO: Are Z and N set using the 64bit value
     // or just the upper word or lower word?
-    GBA.cpsr.set_Z(res == 0);
-    GBA.cpsr.set_N((res & 0x8000_0000_0000_0000) != 0);
-    GBA.cpsr.set_C(false); //C=destroyed (ARMv4 and below)
+    GBA.cpsr.set_zero_flag(res == 0);
+    GBA.cpsr.set_negative_flag((res & 0x8000_0000_0000_0000) != 0);
+    GBA.cpsr.set_carry_flag(false); //C=destroyed (ARMv4 and below)
   }
   GBA.clocks += 0; // todo:clocks
   Ok(())
@@ -258,8 +258,8 @@ fn HDT_IO(GBA: &mut GBA, opcode: u32) -> ARMResult {
   GBA.clocks += 0; // todo:clocks
   unimplemented!()
 }
-/// Single Data Transfer
-fn SDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
+/// Single Data Transfer (SDT)
+fn single_data_transfer(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
@@ -276,7 +276,7 @@ fn SDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
       6 => register_value.rotate_right(shift_amount),
       _ => {
         return Err(format!(
-          "Invalid instruction SDT(Single Data Transfer) shift type {}",
+          "Invalid instruction SDis_thumb_state_flag(Single Data Transfer) shift type {}",
           shift_type & 6
         ));
       }
@@ -305,8 +305,8 @@ fn SDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
   GBA.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Block Data Transfer
-fn BDT(GBA: &mut GBA, opcode: u32) -> ARMResult {
+/// Block Data Transfer (BDT)
+fn block_data_transfer(GBA: &mut GBA, opcode: u32) -> ARMResult {
   let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) = as_flags(opcode);
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
   let (rlist2, rlist1) = (((opcode & 0x0000_FF00) >> 8) as u8, (opcode & 0x0000_00FF) as u8);
@@ -513,7 +513,7 @@ fn ALU(GBA: &mut GBA, opcode: u32) -> ARMResult {
     5 => {
       //adc
       let (result, overflow) = op2.overflowing_add(rn);
-      let (result, overflow2) = result.overflowing_add(cpsr.C() as u32);
+      let (result, overflow2) = result.overflowing_add(cpsr.carry_flag() as u32);
       *res = result;
       set_all_flags(
         result,
@@ -524,14 +524,14 @@ fn ALU(GBA: &mut GBA, opcode: u32) -> ARMResult {
     6 => {
       //sbc
       let (result, overflow) = rn.overflowing_sub(op2);
-      let (result, overflow2) = result.overflowing_sub(1 - (cpsr.C() as u32));
+      let (result, overflow2) = result.overflowing_sub(1 - (cpsr.carry_flag() as u32));
       *res = result;
       set_all_flags(*res, Some(op2 <= rn), Some(overflow || overflow2));
     }
     7 => {
       //rsc
       let (result, overflow) = op2.overflowing_sub(rn);
-      let (result, overflow2) = result.overflowing_sub(1 - (cpsr.C() as u32));
+      let (result, overflow2) = result.overflowing_sub(1 - (cpsr.carry_flag() as u32));
       *res = result;
       set_all_flags(*res, Some(rn <= op2), Some(overflow || overflow2));
     }
@@ -645,16 +645,16 @@ fn MRS(GBA: &mut GBA, opcode: u32) -> ARMResult {
   };
   Ok(())
 }
-/// Coprocessor Data Transfer (Unimplemented)
-fn CDT(_: &mut GBA, _: u32) -> ARMResult {
+/// Coprocessor Data Transfer (CDT) (Unimplemented)
+fn coprocessor_data_transfer(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
-/// Coprocessor Data Operation (Unimplemented)
-fn CDO(_: &mut GBA, _: u32) -> ARMResult {
+/// Coprocessor Data Operation (CDO) (Unimplemented)
+fn coprocessor_data_operation(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
-/// Coprocessor Register Transfer (Unimplemented)
-fn CRT(_: &mut GBA, _: u32) -> ARMResult {
+/// Coprocessor Register Transfer (CRT) (Unimplemented)
+fn coprocessor_register_transfer(_: &mut GBA, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 
@@ -674,17 +674,17 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
       bits27_20,
       bits11_4 // TODO: Jump to undef handler
     ),
-    ([F, T, _, _, _, _, _, _], _) => SDT,
+    ([F, T, _, _, _, _, _, _], _) => single_data_transfer,
     ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => MUL,
     ([F, F, F, F, T, _, _, _], [_, _, _, _, T, F, F, T]) => MULL,
     ([F, F, F, T, F, _, F, F], [F, F, F, F, T, F, F, T]) => SWP,
     ([F, F, F, _, _, F, _, _], [F, F, F, F, T, _, _, T]) => HDT_RO,
     ([F, F, F, _, _, T, _, _], [F, F, F, F, T, _, _, T]) => HDT_IO,
-    ([T, F, F, _, _, _, _, _], _) => BDT,
-    ([T, T, F, _, _, _, _, _], _) => CDT,
-    ([T, T, T, F, _, _, _, _], [_, _, _, F, _, _, _, _]) => CDO,
-    ([T, T, T, F, _, _, _, _], [_, _, _, T, _, _, _, _]) => CRT,
-    ([T, T, T, T, _, _, _, _], _) => SWI,
+    ([T, F, F, _, _, _, _, _], _) => block_data_transfer,
+    ([T, T, F, _, _, _, _, _], _) => coprocessor_data_transfer,
+    ([T, T, T, F, _, _, _, _], [_, _, _, F, _, _, _, _]) => coprocessor_data_operation,
+    ([T, T, T, F, _, _, _, _], [_, _, _, T, _, _, _, _]) => coprocessor_register_transfer,
+    ([T, T, T, T, _, _, _, _], _) => software_interrupt,
     ([T, F, T, _, _, _, _, _], _) => B,
     ([F, F, F, T, F, F, T, F], [T, T, T, T, F, F, F, T])
       if (opcode & 0x000F_F000) == 0x000F_F000 =>

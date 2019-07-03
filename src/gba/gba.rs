@@ -336,13 +336,13 @@ impl GBA {
     Ok(())
   }
   pub(crate) fn thumb(&mut self) -> bool {
-    self.cpsr.T()
+    self.cpsr.thumb_state_flag()
   }
   pub fn state_as_string_without_pc(&mut self) -> String {
     format!(
       "{}\n{}",
       self
-        .regs
+        .regs 
         .iter()
         .enumerate()
         .take(15)
