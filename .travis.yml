@@ -1,7 +1,7 @@
 language: rust
 rust:
   - nightly
-  
+
 cache:
   - apt
   - homebrew
@@ -9,43 +9,43 @@ cache:
 
 matrix:
   include:
-  - env: ARCH=i686-unknown-linux-gnu
-    os: linux
-  - env: ARCH=x86_64-unknown-linux-gnu
-    os: linux
-  - env: ARCH=i686-pc-windows-msvc
-    os: windows
-  - env: ARCH=x86_64-pc-windows-msvc
-    os: windows
-  - env: ARCH=x86_64-apple-darwin
-    os: osx
-  - env: ARCH=i686-apple-darwin
-    os: osx
+    - env: ARCH=i686-unknown-linux-gnu
+      os: linux
+    - env: ARCH=x86_64-unknown-linux-gnu
+      os: linux
+    - env: ARCH=i686-pc-windows-msvc
+      os: windows
+    - env: ARCH=x86_64-pc-windows-msvc
+      os: windows
+    - env: ARCH=x86_64-apple-darwin
+      os: osx
+    - env: ARCH=i686-apple-darwin
+      os: osx
   #fermium doesn't fully work on 32bit targets at the moment
   allow_failures:
-  - env: ARCH=i686-apple-darwin
-    os: osx
-  - env: ARCH=i686-unknown-linux-gnu
-    os: linux
-  - env: ARCH=i686-pc-windows-msvc
-    os: windows
+    - env: ARCH=i686-apple-darwin
+      os: osx
+    - env: ARCH=i686-unknown-linux-gnu
+      os: linux
+    - env: ARCH=i686-pc-windows-msvc
+      os: windows
 
 addons:
   apt:
     packages:
-    - libsdl2-dev
-    - libsdl2-image-dev
-    - libsdl2-mixer-dev
-    - libsdl2-ttf-dev
-    - libegl1-mesa-dev
-    - libgles2-mesa-dev
+      - libsdl2-dev
+      - libsdl2-image-dev
+      - libsdl2-mixer-dev
+      - libsdl2-ttf-dev
+      - libegl1-mesa-dev
+      - libgles2-mesa-dev
   homebrew:
     update: true
     packages:
-    - sdl2
-    - sdl2-image
-    - sdl2-mixer
-    - sdl2-ttf
+      - sdl2
+      - sdl2-image
+      - sdl2-mixer
+      - sdl2-ttf
 
 script:
   - rustup default nightly
@@ -73,4 +73,4 @@ before_deploy:
   - cp -r target/doc public/
   - pwd
   - ls
-  - echo "<meta http-equiv=refresh content=0;url=doc/rgba/index.html>" > public/index.html
+  - echo "<meta http-equiv=refresh content=0;url=doc/rusty_boy_advance/index.html>" > public/index.html
