@@ -51,8 +51,10 @@ script:
   - rustup default nightly
   - rustup target add $ARCH
   - cargo build --target=$ARCH
+  - cargo test --target=$ARCH
+  - cargo bench --target=$ARCH
   - |
-    if [ $TRAVIS_OS_NAME == "linux" && $ARCH == "x86_64" ]; then
+    if [ $ARCH == "x86_64-unknown-linux-gnu" ]; then
       export DO_DEPLOY="yes";
     fi
 
@@ -67,7 +69,6 @@ deploy:
     condition: $DO_DEPLOY = yes
 
 before_deploy:
-  - cargo bench
   - cargo doc --document-private-items --no-deps
   - mkdir public
   - cp -r target/doc public/
