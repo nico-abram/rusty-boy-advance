@@ -8,6 +8,10 @@ use super::{
   Cpu,
 };
 
+pub type ThumbError = String;
+pub type ThumbResult = Result<(), ThumbError>;
+pub type ThumbInstruction = fn(&mut Cpu, u16) -> ThumbResult;
+
 #[inline]
 fn as_11th_bit(opcode: u16) -> bool {
   (opcode & 0x0800) != 0
@@ -54,7 +58,7 @@ fn sign_flag(N: u32) -> bool {
   (N >> 31) == 1
 }
 
-fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
+fn move_shifted_register(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let operation = as_bits_11_and_12(opcode);
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
   let offset = as_bits_6_to_10(opcode);
@@ -74,9 +78,10 @@ fn move_shifted_register(cpu: &mut Cpu, opcode: u16) {
     None,
   );
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// ADD/SUB
-fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
+fn add_or_sub(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let (_, rn, rs, rd) = as_lower_3bit_values(opcode);
   let immediate = (opcode & 0x0400) != 0;
   let is_substraction = (opcode & 0x0200) != 0;
@@ -104,9 +109,10 @@ fn add_or_sub(cpu: &mut Cpu, opcode: u16) {
     result
   };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// Move, compare, add and substract immediate
-fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
+fn immediate_operation(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let rd = as_bits_8_to_10(opcode);
   let offset = u32::from(as_low_byte(opcode));
   let operation = as_bits_11_and_12(opcode);
@@ -116,7 +122,7 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     let (res, overflow) = rd_val.overflowing_sub(offset);
     cpu.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
     cpu.clocks += 0; // TODO: clocks
-    return;
+    return Ok(());
   }
   cpu.regs[rd] = match operation {
     0 => {
@@ -139,8 +145,9 @@ fn immediate_operation(cpu: &mut Cpu, opcode: u16) {
     _ => unimplemented!(), //std::hint::unreachable_unchecked()
   };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
-fn alu_operation(cpu: &mut Cpu, opcode: u16) {
+fn alu_operation(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
   let operation = ((opcode >> 6) & 0x000F) as u8;
   let (rs_val, rd_val) = (cpu.regs[rs], cpu.regs[rd]);
@@ -276,9 +283,10 @@ fn alu_operation(cpu: &mut Cpu, opcode: u16) {
     _ => unimplemented!("Impossible"),
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// HiReg/BX
-fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
+fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
   let rs_most_significant_bit = (opcode & 0x0040) >> 6;
   let rd_most_significant_bit = (opcode & 0x0080) >> 7;
@@ -313,22 +321,23 @@ fn high_register_operations_or_bx(cpu: &mut Cpu, opcode: u16) {
       } else {
         cpu.regs[15] = rs_val & 0xFFFF_FFFE;
       }
-      return;
     }
     _ => unimplemented!("Impossible"), //std::hint::unreachable_unchecked()
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR PC
-fn pc_relative_load(cpu: &mut Cpu, opcode: u16) {
+fn pc_relative_load(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let rd = as_bits_8_to_10(opcode);
   let byte = u32::from(as_low_byte(opcode));
   let offset = byte << 2; // In steps of 4
   cpu.regs[rd] = cpu.fetch_u32(((cpu.regs[15] + 2) & 0xFFFF_FFFC).overflowing_add(offset).0);
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR/STR
-fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
+fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let is_load = as_11th_bit(opcode);
   let is_byte_else_word = (opcode & 0x0400) != 0;
@@ -345,9 +354,10 @@ fn load_or_store_with_relative_offset(cpu: &mut Cpu, opcode: u16) {
       if is_byte_else_word { u32::from(cpu.fetch_byte(addr)) } else { cpu.fetch_u32(addr) };
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR/STR H/SB/SH
-fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
+fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   println!("ohayo");
   let H = as_11th_bit(opcode);
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
@@ -356,7 +366,7 @@ fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
   if !H && !sign_extend {
     cpu.write_u16(addr, cpu.regs[rd] as u16);
     cpu.clocks += 0; // TODO: clocks
-    return;
+    return Ok(());
   }
   cpu.regs[rd] = if H {
     // Half-word(16 bits)
@@ -369,9 +379,10 @@ fn load_or_store_sign_extended_byte_or_halfword(cpu: &mut Cpu, opcode: u16) {
     (i32::from(cpu.fetch_byte(addr) as i8) as u32) // Sign extend
   };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR/STR {B}
-fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) {
+fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let is_byte_else_word = (opcode & 0x1000) != 0;
   let is_load_else_store = as_11th_bit(opcode);
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);
@@ -394,9 +405,10 @@ fn load_or_store_with_immediate_offset(cpu: &mut Cpu, opcode: u16) {
     }
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR/STR H
-fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
+fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let is_load_else_store = as_11th_bit(opcode);
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);
   let offset = as_bits_6_to_10(opcode);
@@ -407,9 +419,10 @@ fn load_or_store_halfword(cpu: &mut Cpu, opcode: u16) {
     cpu.write_u16(addr, cpu.regs[rd] as u16);
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LDR/STR SP
-fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) {
+fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let is_load_else_store = as_11th_bit(opcode);
   let byte = as_low_byte(opcode);
   let offset = u32::from(byte) << 2;
@@ -421,9 +434,10 @@ fn stack_pointer_relative_load_or_store(cpu: &mut Cpu, opcode: u16) {
     cpu.write_u32(addr, cpu.regs[rd]);
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// LOAD PC/SP
-fn load_address(cpu: &mut Cpu, opcode: u16) {
+fn load_address(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let load_sp_else_pc = as_11th_bit(opcode);
   let byte = as_low_byte(opcode);
   let nn = u32::from(byte) << 2;
@@ -435,9 +449,10 @@ fn load_address(cpu: &mut Cpu, opcode: u16) {
     ((cpu.regs[15] + 4) & !2) + nn
   };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// ADD/SUB SP,nn
-fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
+fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let byte = as_low_byte(opcode);
   let substract_else_add = (byte & 0x80) != 0;
   let byte7 = byte & 0x0000_007F;
@@ -446,9 +461,10 @@ fn add_or_sub_offset_to_stack_pointer(cpu: &mut Cpu, opcode: u16) {
   cpu.regs[13] =
     if substract_else_add { sp.overflowing_sub(offset).0 } else { sp.overflowing_add(offset).0 };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// PUSH/POP
-fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
+fn push_or_pop(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let is_pop_else_push = as_11th_bit(opcode);
   // PUSH LR or POP PC
   let pc_or_lr_flag = (opcode & 0x0100) != 0;
@@ -482,9 +498,10 @@ fn push_or_pop(cpu: &mut Cpu, opcode: u16) {
   }
   cpu.regs[13] = sp;
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// STM/LDM
-fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
+fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let rb = as_bits_8_to_10(opcode);
   let is_load_else_store = as_11th_bit(opcode);
   let rlist = as_low_byte(opcode);
@@ -502,16 +519,17 @@ fn multiple_loads_or_stores(cpu: &mut Cpu, opcode: u16) {
     }
   }
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// B{COND}
-fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
+fn conditional_branch(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let offset = u32::from(as_low_byte(opcode)) << 1;
   let (is_negative, offset) = ((offset * 0x0000_0100) != 0, offset & 0x0000_00FE);
   let cond = (opcode >> 8) & 0x000F;
   let should_not_jump = super::arm::check_cond(cpu, u32::from(cond) << 28);
   if should_not_jump {
     cpu.clocks += 0; // TODO: clocks
-    return;
+    return Ok(());
   }
   cpu.regs[15] = if is_negative {
     cpu.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
@@ -519,45 +537,50 @@ fn conditional_branch(cpu: &mut Cpu, opcode: u16) {
     cpu.regs[15].overflowing_add(offset + 2).0
   };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// SWI
-fn software_interrupt(cpu: &mut Cpu, opcode: u16) {
-  super::arm::SWI(cpu, u32::from(opcode) << 16);
+fn software_interrupt(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
+  super::arm::SWI(cpu, u32::from(opcode) << 16)?;
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// B
-fn branch(cpu: &mut Cpu, opcode: u16) {
+fn branch(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   //let offset = (opcode & 0x01FF) as u32;
   let offset = u32::from(as_low_11bits(opcode)) << 1;
   let is_negative = (opcode & 0x0200) != 0;
   let pc = (*cpu.pc()).overflowing_add(2).0;
   *cpu.pc() = if is_negative { pc.overflowing_sub(offset).0 } else { pc.overflowing_add(offset).0 };
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
 /// BL/BLX
 ///
 /// This is actually a 32 bit instruction (2 thumb instructions).
 ///
 /// The first one has the upper 11 bits and the second the lower 11
-fn branch_and_link_or_link_and_exchange_first_opcode(cpu: &mut Cpu, opcode: u16) {
+fn branch_and_link_or_link_and_exchange_first_opcode(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   let upper_offset = (i32::from((as_low_11bits(opcode) as i16) << 5) << 7) as u32;
   let pc = cpu.regs[15];
   cpu.regs[14] = pc.overflowing_add(upper_offset).0.overflowing_add(2).0;
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
-fn branch_and_link_or_link_and_exchange_second_opcode(cpu: &mut Cpu, opcode: u16) {
+fn branch_and_link_or_link_and_exchange_second_opcode(cpu: &mut Cpu, opcode: u16) -> ThumbResult {
   //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
   let lower_offset = u32::from(as_low_11bits(opcode) << 1);
   let pc = cpu.regs[15] + 2;
   cpu.regs[15] = cpu.regs[14].overflowing_add(lower_offset).0;
   cpu.regs[14] = pc - 1;
   cpu.clocks += 0; // TODO: clocks
+  Ok(())
 }
-fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
   let bits15_8 = (opcode >> 8) as u8;
   const T: bool = true;
   const F: bool = false;
-  match bits15_8.as_bools() {
+  Ok(match bits15_8.as_bools() {
     [F, F, F, T, T, _, _, _] => add_or_sub, /* TODO: The ARM7TDMI manual says 0b000111 but GBATEK 0x00011 */
     [F, F, F, _, _, _, _, _] => move_shifted_register,
     [F, F, T, _, _, _, _, _] => immediate_operation,
@@ -578,17 +601,18 @@ fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
     [T, T, T, F, F, _, _, _] => branch,
     [T, T, T, T, F, _, _, _] => branch_and_link_or_link_and_exchange_first_opcode,
     [T, T, T, T, T, _, _, _] => branch_and_link_or_link_and_exchange_second_opcode,
-    _ => unimplemented!(),
-  }
+    _ => return Err(format!("Invalid thumb opcode: {:x}", opcode)),
+  })
 }
 
-pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
+pub(crate) fn execute_one_instruction(cpu: &mut Cpu) -> ThumbResult {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u16(pc);
   *cpu.pc() += 2;
   println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
-  let instruction = decode_thumb(opcode);
-  instruction(cpu, opcode);
+  let instruction = decode_thumb(opcode)?;
+  instruction(cpu, opcode)?;
+  Ok(())
 }
 
 #[cfg(test)]
@@ -597,8 +621,10 @@ mod tests {
 
   extern crate test;
   use test::Bencher;
-  fn none(_: &mut Cpu, _: u16) {}
-  fn decode_thumb(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+  fn none(_: &mut Cpu, _: u16) -> ThumbResult {
+    Ok(())
+  }
+  fn decode_thumb(opcode: u16) -> ThumbInstruction {
     let bits15_8 = (opcode >> 8) as u8;
     const T: bool = true;
     const F: bool = false;
@@ -626,7 +652,7 @@ mod tests {
     }
   }
   #[allow(clippy::identity_op)]
-  fn decode_thumb_raw(opcode: u16) -> fn(&mut Cpu, u16) -> () {
+  fn decode_thumb_raw(opcode: u16) -> ThumbInstruction {
     let bits15_8 = (opcode >> 8) as u8;
     const T: bool = true;
     const F: bool = false;

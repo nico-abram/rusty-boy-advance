@@ -2,7 +2,7 @@ use crate::cpu::Cpu;
 use beryllium::*;
 
 #[allow(clippy::unneeded_field_pattern)]
-pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
+pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
   let sdl = unsafe { beryllium::init() }?;
   let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT32_DEFAULT)?;
@@ -49,9 +49,9 @@ pub fn run(cpu: &mut Cpu, frames_to_run: u32) -> Result<(), String> {
       }
     }
     if frames_to_run == 0 {
-      cpu.run_one_frame();
+      cpu.run_one_frame()?;
     } else {
-      cpu.run_one_frame();
+      cpu.run_one_frame()?;
       frames_left_to_run -= 1;
       if frames_left_to_run == 0 {
         println!(

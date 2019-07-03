@@ -8,7 +8,7 @@ mod cpu;
 mod renderer;
 
 #[allow(clippy::expect_fun_call)]
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
   let matches = App::new("RGBA")
     .version("0.0")
     .author("Nick12")
@@ -76,22 +76,22 @@ fn main() -> Result<(), String> {
   let file = std::fs::File::open(rom_filename)
     .expect(format!("ROM file {} not found", rom_filename).as_str());
   let reader = std::io::BufReader::new(file);
-  cpu.load(reader);
+  cpu.load(reader)?;
 
   if instructions_to_run > 0 {
     for _ in 0..instructions_to_run {
-      cpu.run_one_instruction();
+      cpu.run_one_instruction()?;
     }
   } else if headless {
     if frames_to_run != 0 {
       for _ in 0..frames_to_run {
-        cpu.run_one_frame();
+        cpu.run_one_frame()?;
       }
     } else {
-      cpu.run_forever();
+      cpu.run_forever()?;
     }
   } else {
-    renderer::run(&mut cpu, frames_to_run).unwrap();
+    renderer::run(&mut cpu, frames_to_run)?;
   }
   Ok(())
 }

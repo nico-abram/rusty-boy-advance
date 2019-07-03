@@ -4,6 +4,10 @@
 
 use super::{cpsr::CPSR, utils::AsBoolSlice, Cpu, CpuMode, SWI_HANDLER};
 
+pub type ARMError = String;
+pub type ARMResult = Result<(), ARMError>;
+pub type ARMInstruction = fn(&mut Cpu, u32) -> ARMResult;
+
 pub(crate) enum Cond {
   /// Equal (Z)
   EQ,
@@ -125,7 +129,7 @@ fn as_extra_flag(opcode: u32) -> bool {
 }
 /// Branch and Exchange
 /// If the condition is true, branch and switch mode
-fn BX(cpu: &mut Cpu, opcode: u32) {
+fn BX(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   cpu.clocks += 3; // TODO: Clocks
                    // Address to jump to is in a register given by lowest nibble
   let reg_n = opcode & 0x0000_000F;
@@ -137,12 +141,13 @@ fn BX(cpu: &mut Cpu, opcode: u32) {
     cpu.cpsr.set_T(true);
   }
   *cpu.pc() = jmp_addr;
+  Ok(())
 }
 /// Branch or Branch and link
 ///
 /// BL is similar to CALL, it stores the return PC (PC+4) in the
 /// LR (Register 14). If using nested functions, that requires pushing LR onto the stack.
-fn B(cpu: &mut Cpu, opcode: u32) {
+fn B(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   cpu.clocks += 3; // TODO: Clocks
   let offset = (opcode & 0x007F_FFFF) << 2; //*4
   let is_positive = (opcode & 0x0080_0000) == 0;
@@ -158,19 +163,21 @@ fn B(cpu: &mut Cpu, opcode: u32) {
       pc.overflowing_sub(!(offset | 0xFF00_0003) + 4).0
     })
     .0;
+  Ok(())
 }
 /// Software Interrupt
 ///
 /// Used to call BIOS functions
-pub(crate) fn SWI(cpu: &mut Cpu, _: u32) {
+pub(crate) fn SWI(cpu: &mut Cpu, _: u32) -> ARMResult {
   cpu.set_mode(CpuMode::Supervisor);
   *cpu.pc() = SWI_HANDLER;
   cpu.cpsr.set_T(false); // Set ARM state
   cpu.cpsr.set_I(true);
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Single data swap
-fn SWP(cpu: &mut Cpu, opcode: u32) {
+fn SWP(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (_, _, is_byte_else_word, _, _) = as_flags(opcode);
   let (rn, rd, _, _, rm) = as_usize_nibbles(opcode);
   if is_byte_else_word {
@@ -186,14 +193,15 @@ fn SWP(cpu: &mut Cpu, opcode: u32) {
     *cpu.reg_mut(rn) = *cpu.reg_mut(rm);
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Multiply long
-fn MULL(cpu: &mut Cpu, opcode: u32) {
+fn MULL(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   //TODO: Accumulate?
   let (_, _, signed, accumulate, set_cond_flags) = as_flags(opcode);
   let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
   let res: u64 = if signed {
-    unimplemented!("No support for signed long multiplication")
+    return Err(String::from("No support for signed long multiplication"));
   } else {
     u64::from(cpu.fetch_reg(rn)) * u64::from(cpu.fetch_reg(rm))
   };
@@ -207,9 +215,10 @@ fn MULL(cpu: &mut Cpu, opcode: u32) {
     cpu.cpsr.set_C(false); //C=destroyed (ARMv4 and below)
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Multiply
-fn MUL(cpu: &mut Cpu, opcode: u32) {
+fn MUL(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
@@ -223,11 +232,12 @@ fn MUL(cpu: &mut Cpu, opcode: u32) {
     cpu.cpsr.set_all_status_flags(res, Some(false), None);
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Halfword Data Transfer Register Offset
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_RO(cpu: &mut Cpu, opcode: u32) {
+fn HDT_RO(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, _, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
@@ -239,7 +249,7 @@ fn HDT_RO(cpu: &mut Cpu, opcode: u32) {
 // Halfword Data Transfer Immediate Offset
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_IO(cpu: &mut Cpu, opcode: u32) {
+fn HDT_IO(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, offset, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
@@ -249,7 +259,7 @@ fn HDT_IO(cpu: &mut Cpu, opcode: u32) {
   unimplemented!()
 }
 /// Single Data Transfer
-fn SDT(cpu: &mut Cpu, opcode: u32) {
+fn SDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
@@ -264,7 +274,12 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
       2 => register_value.overflowing_shr(shift_amount).0,
       4 => (register_value as i32).overflowing_shr(shift_amount).0 as u32,
       6 => register_value.rotate_right(shift_amount),
-      _ => unimplemented!("Invalid instruction"),
+      _ => {
+        return Err(format!(
+          "Invalid instruction SDT(Single Data Transfer) shift type {}",
+          shift_type & 6
+        ));
+      }
     }
   };
   let mut addr =
@@ -288,9 +303,10 @@ fn SDT(cpu: &mut Cpu, opcode: u32) {
     cpu.regs[rn] = addr;
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Block Data Transfer
-fn BDT(cpu: &mut Cpu, opcode: u32) {
+fn BDT(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (is_pre_offseted, is_up, psr_or_user_mode, write_back, is_load_else_store) = as_flags(opcode);
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
   let (rlist2, rlist1) = (((opcode & 0x0000_FF00) >> 8) as u8, (opcode & 0x0000_00FF) as u8);
@@ -310,7 +326,10 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
         }
       }
       13..=15 => &mut cpu.all_modes_banks[CpuMode::User.as_usize()][x - 13],
-      _ => unimplemented!("This should never happen"),
+      _ => unimplemented!(
+        "This should never happen. Attempt to access an invalid register number ({})",
+        x
+      ),
     }
   } else {
     |cpu, x| &mut cpu.regs[x]
@@ -381,13 +400,14 @@ fn BDT(cpu: &mut Cpu, opcode: u32) {
   if is_psr {
     cpu.cpsr = *cpu
       .get_spsr_mut()
-      .expect("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode");
+      .ok_or("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode")?;
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Data Processing or PSR transfer
 /// This handles all ALU operations
-fn ALU(cpu: &mut Cpu, opcode: u32) {
+fn ALU(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let immediate = as_extra_flag(opcode);
   let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
   let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
@@ -425,7 +445,7 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
           Some((register_value & 0x8000_0000) != 0),
         ),
         3 => unimplemented!("TODO: RRX"),
-        _ => unimplemented!("Impossible"),
+        _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     } else {
       //TODO:carry(Are they right??)
@@ -462,7 +482,7 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
             None
           },
         ),
-        _ => unimplemented!("Impossible"),
+        _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     };
     (op2, if lowest_byte == 0 { None } else { shift_carry })
@@ -549,7 +569,7 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
     }
     10 => {
       //cmp
-      let (res, v) = rn.overflowing_sub(op2);
+      let (res, _) = rn.overflowing_sub(op2);
       // set_all_flags(res, Some(op2 <= rn), Some(v));
       set_all_flags(res, Some(op2 <= rn), Some(false));
     }
@@ -578,12 +598,13 @@ fn ALU(cpu: &mut Cpu, opcode: u32) {
       *res = !op2;
       set_all_flags(*res, shift_carry, None);
     }
-    _ => unimplemented!("Impossible"),
+    _ => unimplemented!("Impossible. We AND'ed 4 bits, there are 16 posibilities"),
   }
   cpu.clocks += 0; // todo:clocks
+  Ok(())
 }
 /// Move to Status Register
-fn MSR(cpu: &mut Cpu, opcode: u32) {
+fn MSR(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   const FLAGS_MASK: u32 = 0xFF00_0000;
   const STATE_MASK: u32 = 0x0000_0020;
   const PRIVACY_MASK: u32 = 0x0000_00CF;
@@ -601,7 +622,7 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
   let current_mode = cpu.cpsr.mode();
   if use_spsr {
     // If modifying the spsr we can directly modify it
-    let spsr = cpu.get_spsr_mut().unwrap();
+    let spsr = cpu.get_spsr_mut().ok_or("")?;
     let old = spsr.0;
     let mut valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
       | (if change_flags_fields { FLAGS_MASK } else { 0 });
@@ -623,35 +644,38 @@ fn MSR(cpu: &mut Cpu, opcode: u32) {
       cpu.cpsr = CPSR((cpu.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
     }
   };
+  Ok(())
 }
 /// Move to register from status register
-fn MRS(cpu: &mut Cpu, opcode: u32) {
+fn MRS(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (_, _, use_spsr, _, _) = as_flags(opcode);
   cpu.regs[((opcode & 0x0000_F000) >> 12) as usize] =
-    if use_spsr { cpu.get_spsr_mut().unwrap().0 } else { cpu.cpsr.0 };
+    if use_spsr { cpu.get_spsr_mut()
+      .ok_or("Cannot use ^(PSR) on arm MRS while in User or Priviledged(System) mode")?.0 } else { cpu.cpsr.0 };
+  Ok(())
 }
 /// Coprocessor Data Transfer (Unimplemented)
-fn CDT(_: &mut Cpu, _: u32) {
+fn CDT(_: &mut Cpu, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Data Operation (Unimplemented)
-fn CDO(_: &mut Cpu, _: u32) {
+fn CDO(_: &mut Cpu, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 /// Coprocessor Register Transfer (Unimplemented)
-fn CRT(_: &mut Cpu, _: u32) {
+fn CRT(_: &mut Cpu, _: u32) -> ARMResult {
   unimplemented!("Coprocessor instructions are not supported")
 }
 
 /// Map an opcode to an instruction (An fn(&mut Cpu, u32))
 ///
 /// Panics on undefined or invalid opcode.
-fn decode_arm(opcode: u32) -> fn(&mut Cpu, u32) {
+fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
   let bits27_20 = (opcode >> 20) as u8;
   let bits11_4 = (opcode >> 4) as u8;
   const T: bool = true;
   const F: bool = false;
-  match (bits27_20.as_bools(), bits11_4.as_bools()) {
+  Ok(match (bits27_20.as_bools(), bits11_4.as_bools()) {
     ([F, T, T, _, _, _, _, _], [_, _, _, _, _, _, _, T]) => unimplemented!(
       "Unimplemented: Undefined instruction {:b} ({:x}) bits 27-20: {:x} bits 11-4: {:x}",
       opcode,
@@ -687,17 +711,18 @@ fn decode_arm(opcode: u32) -> fn(&mut Cpu, u32) {
       bits11_4,
       *self.pc()
     ),*/
-  }
+  })
 }
 
-pub(crate) fn execute_one_instruction(cpu: &mut Cpu) {
+pub(crate) fn execute_one_instruction(cpu: &mut Cpu) -> ARMResult {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u32(pc);
   *cpu.pc() += 4;
   println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
   if check_cond(cpu, opcode) {
-    return;
+    return Ok(());
   }
-  let instruction = decode_arm(opcode);
-  instruction(cpu, opcode);
+  let instruction = decode_arm(opcode)?;
+  instruction(cpu, opcode)?;
+  Ok(())
 }

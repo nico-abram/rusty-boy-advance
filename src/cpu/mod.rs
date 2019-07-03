@@ -32,6 +32,29 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 
 pub(crate) static mut COUNT: u32 = 0;
 
+#[derive(Debug)]
+pub enum GBAError {
+  ARM(arm::ARMError),
+  Thumb(thumb::ThumbError),
+}
+impl GBAError {
+  fn as_string(&self) -> &str {
+    match self {
+      GBAError::ARM(err) => err,
+      GBAError::Thumb(err) => err,
+    }
+  }
+}
+impl std::fmt::Display for GBAError {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.as_string())
+  }
+}
+impl std::error::Error for GBAError {
+  fn description(&self) -> &str {
+    self.as_string()
+  }
+}
 pub struct Cpu {
   //// Output image
   pub output_texture: [u32; 240 * 160],
@@ -264,25 +287,25 @@ impl Cpu {
     self.regs[13] = 0x0300_7F00; // Taken from mrgba
   }
   /// Load a ROM from a reader
-  pub fn load<T: std::io::Read>(&mut self, mut reader: T) {
+  pub fn load<T: std::io::Read>(
+    &mut self,
+    mut reader: T,
+  ) -> Result<(), Box<dyn std::error::Error>> {
     self.reset();
     let mut buf = Vec::with_capacity(16 * MB);
-    reader.read_to_end(&mut buf).unwrap();
+    reader.read_to_end(&mut buf)?;
     //TODO: Verify nintendo logo?
     let title = &buf[0x00A0..0x00AC];
     let title =
       if let Some(idx) = title.iter().position(|x| *x == 0) { &title[0..idx] } else { title };
-    let title = String::from_utf8(title.to_vec()).unwrap();
+    let title = String::from_utf8(title.to_vec())?;
     let code = &buf[0x00AC..0x00B0];
     //dbg!(std::str::from_utf8(code).unwrap());
     for (input, out) in buf.iter().zip(self.game_pak.iter_mut()) {
       *out = *input;
     }
-    println_maybe!(
-      "Running rom '{}' (Code: {})",
-      title,
-      String::from_utf8(code.to_vec()).unwrap_or_else(|_| String::from("Invalid"))
-    );
+    println_maybe!("Running rom '{}' (Code: {})", title, String::from_utf8(code.to_vec())?);
+    Ok(())
   }
   pub(crate) fn thumb(&mut self) -> bool {
     self.cpsr.T()
@@ -294,32 +317,35 @@ impl Cpu {
         .regs
         .iter()
         .enumerate()
+        .take(15)
         .map(|(idx, val)| format!("r{}:{:x}", idx, val))
         .collect::<Vec<_>>()
         .join(" "),
       self.cpsr
     )
   }
-  pub fn run_one_instruction(&mut self) {
+  pub fn run_one_instruction(&mut self) -> Result<(), GBAError> {
     println!("{}", self.state_as_string());
     if self.thumb() {
-      thumb::execute_one_instruction(self);
+      thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;
     } else {
-      arm::execute_one_instruction(self);
+      arm::execute_one_instruction(self).map_err(GBAError::ARM)?;
     }
     unsafe {
       COUNT += 1;
     }
+    Ok(())
   }
-  pub fn run_one_frame(&mut self) {
+  pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
     // TODO: However this is meant to be done
     for _ in 0..100 {
-      self.run_one_instruction();
+      self.run_one_instruction()?;
     }
+    Ok(())
   }
-  pub fn run_forever(&mut self) {
+  pub fn run_forever(&mut self) -> Result<(), GBAError> {
     loop {
-      self.run_one_frame();
+      self.run_one_frame()?;
     }
   }
   pub(crate) fn vblank(&mut self) -> u32 {
