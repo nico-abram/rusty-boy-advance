@@ -609,7 +609,7 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) -> ThumbResult {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u16(pc);
   *cpu.pc() += 2;
-  println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
+  (cpu.instruction_hook_with_opcode)(cpu, u32::from(opcode));
   let instruction = decode_thumb(opcode)?;
   instruction(cpu, opcode)?;
   Ok(())

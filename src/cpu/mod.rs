@@ -32,6 +32,11 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 
 pub(crate) static mut COUNT: u32 = 0;
 
+pub enum LogLevel {
+  None,
+  NormalizedEveryInstruction,
+  Debug,
+}
 #[derive(Debug)]
 pub enum GBAError {
   ARM(arm::ARMError),
@@ -84,10 +89,22 @@ pub struct Cpu {
   oam: [u8; KB],
   io_mem: [u8; 1022],
   pub(crate) clocks: u32,
+  instruction_hook: fn(&mut Cpu),
+  instruction_hook_with_opcode: fn(&mut Cpu, u32),
 }
 impl Cpu {
-  /// Too big for the stack so we return a Box
-  pub fn new() -> Box<Self> {
+  pub fn new(log_level: LogLevel, bios_file: std::option::Option<&[u8]>) -> Box<Self> {
+    fn nothing(_: &mut Cpu) {}
+    fn nothing_with_opcode(_: &mut Cpu, _: u32) {}
+    fn print_opcode(_: &mut Cpu, opcode: u32) {
+      println!("opcode {}:{:x}", unsafe { COUNT }, opcode);
+    }
+    fn print_state_normalized(cpu: &mut Cpu) {
+      println!("{}", cpu.state_as_string_without_pc());
+    }
+    fn print_state(cpu: &mut Cpu) {
+      println!("{}", cpu.state_as_string());
+    }
     // Was still getting stack overflows without box X
     let mut cpu = box Cpu {
       output_texture: [0u32; 240 * 160],
@@ -105,9 +122,20 @@ impl Cpu {
       io_mem: [0u8; 1022],
       game_pak: [0u8; 64 * KB],
       clocks: 0u32,
+      instruction_hook: match log_level {
+        LogLevel::Debug => print_state,
+        LogLevel::NormalizedEveryInstruction => print_state_normalized,
+        LogLevel::None => nothing,
+      },
+      instruction_hook_with_opcode: match log_level {
+        LogLevel::Debug => print_opcode,
+        LogLevel::NormalizedEveryInstruction => print_opcode,
+        LogLevel::None => nothing_with_opcode,
+      },
     };
     cpu.reset();
-    cpu.bios_rom.clone_from_slice(include_bytes!("gba_bios.bin")); // Bios also taken from mrgba
+    let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
+    cpu.bios_rom.clone_from_slice(bios_file);
     cpu
   }
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
@@ -310,7 +338,7 @@ impl Cpu {
   pub(crate) fn thumb(&mut self) -> bool {
     self.cpsr.T()
   }
-  pub fn state_as_string(&mut self) -> String {
+  pub fn state_as_string_without_pc(&mut self) -> String {
     format!(
       "{}\n{}",
       self
@@ -324,8 +352,21 @@ impl Cpu {
       self.cpsr
     )
   }
+  pub fn state_as_string(&mut self) -> String {
+    format!(
+      "{}\n{}",
+      self
+        .regs
+        .iter()
+        .enumerate()
+        .map(|(idx, val)| format!("r{}:{:x}", idx, val))
+        .collect::<Vec<_>>()
+        .join(" "),
+      self.cpsr
+    )
+  }
   pub fn run_one_instruction(&mut self) -> Result<(), GBAError> {
-    println!("{}", self.state_as_string());
+    (self.instruction_hook)(self);
     if self.thumb() {
       thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;
     } else {

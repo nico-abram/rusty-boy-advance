@@ -649,9 +649,14 @@ fn MSR(cpu: &mut Cpu, opcode: u32) -> ARMResult {
 /// Move to register from status register
 fn MRS(cpu: &mut Cpu, opcode: u32) -> ARMResult {
   let (_, _, use_spsr, _, _) = as_flags(opcode);
-  cpu.regs[((opcode & 0x0000_F000) >> 12) as usize] =
-    if use_spsr { cpu.get_spsr_mut()
-      .ok_or("Cannot use ^(PSR) on arm MRS while in User or Priviledged(System) mode")?.0 } else { cpu.cpsr.0 };
+  cpu.regs[((opcode & 0x0000_F000) >> 12) as usize] = if use_spsr {
+    cpu
+      .get_spsr_mut()
+      .ok_or("Cannot use ^(PSR) on arm MRS while in User or Priviledged(System) mode")?
+      .0
+  } else {
+    cpu.cpsr.0
+  };
   Ok(())
 }
 /// Coprocessor Data Transfer (Unimplemented)
@@ -703,14 +708,6 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
     ([F, F, _, T, F, _, F, F], [F, F, F, F, F, F, F, F]) => MRS,
     ([F, F, _, T, F, _, T, F], _) => MSR,
     ([F, F, _, _, _, _, _, _], _) => ALU,
-    /*_ => unimplemented!(
-      "Invalid opcode {:b} ({:x}) bits 27-20: {:x} bits 11-4: {:x} at pc {:x}",
-      opcode,
-      opcode,
-      bits27_20,
-      bits11_4,
-      *self.pc()
-    ),*/
   })
 }
 
@@ -718,7 +715,7 @@ pub(crate) fn execute_one_instruction(cpu: &mut Cpu) -> ARMResult {
   let pc = *cpu.pc();
   let opcode = cpu.fetch_u32(pc);
   *cpu.pc() += 4;
-  println!("opcode {}:{:x}", unsafe { super::COUNT }, opcode);
+  (cpu.instruction_hook_with_opcode)(cpu, opcode);
   if check_cond(cpu, opcode) {
     return Ok(());
   }

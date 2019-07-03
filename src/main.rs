@@ -23,14 +23,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .takes_value(true),
     )
     .arg(
-      Arg::with_name("frames")
-        .short('f')
-        .long("frames")
-        .value_name("Frames to run")
-        .help("The number of frames to run before stopping (0 means none)")
+      Arg::with_name("bios")
+        .short('b')
+        .long("bios-file")
+        .value_name("BIOS file")
+        .help("If given, will use as BIOS")
+        .takes_value(true)
+        .required(false),
+    )
+    .arg(
+      Arg::with_name("log-level")
+        .short('l')
         .default_value("0")
-        .required(false)
-        .takes_value(true),
+        .long("log-level")
+        .value_name("Log Level")
+        .possible_values(&["0", "1", "2"])
+        .help("Log Level. 0, 1 or 2")
+        .takes_value(true)
+        .required(false),
     )
     .arg(
       Arg::with_name("headless")
@@ -42,17 +52,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .required(false),
     )
     .arg(
-      Arg::with_name("bios")
-        .short('b')
-        .long("bios-file")
-        .value_name("BIOS file")
-        .help("If given, will use as BIOS")
-        .takes_value(true)
-        .required(false),
+      Arg::with_name("frames")
+        .short('f')
+        .long("frames")
+        .value_name("Frames to run")
+        .help("The number of frames to run before stopping (0 means none)")
+        .default_value("0")
+        .required(false)
+        .takes_value(true),
     )
     .arg(
       Arg::with_name("instructions")
         .short('i')
+        .default_value("0")
         .long("instructions-to-run")
         .value_name("Instructions")
         .help("Number of instructions to execute before stopping. Forces headless")
@@ -61,22 +73,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .get_matches();
 
-  let frames_to_run = matches.value_of("frames").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
-  let instructions_to_run =
-    matches.value_of("instructions").unwrap_or("0").parse::<u32>().unwrap_or(0u32);
-  //TODO: Actually use the given bios file
-  let bios_file = matches.value_of("bios").map(|rom_filename| {
-    std::fs::File::open(rom_filename)
-      .expect(format!("BIOS file {} not found", rom_filename).as_str())
-  });
+  let log_level = matches.value_of("log-level").unwrap().parse::<u32>().unwrap();
+  let frames_to_run = matches.value_of("frames").unwrap().parse::<u32>().unwrap();
+  let instructions_to_run = matches.value_of("instructions").unwrap().parse::<u32>().unwrap();
+  let bios_file_name_option = matches.value_of("bios");
   let rom_filename = matches.value_of("rom").unwrap();
   let headless = matches.is_present("headless");
 
-  let mut cpu = cpu::Cpu::new();
-  let file = std::fs::File::open(rom_filename)
-    .expect(format!("ROM file {} not found", rom_filename).as_str());
-  let reader = std::io::BufReader::new(file);
-  cpu.load(reader)?;
+  let mut cpu = {
+    let log_level = match log_level {
+      0 => cpu::LogLevel::None,
+      1 => cpu::LogLevel::NormalizedEveryInstruction,
+      2 => cpu::LogLevel::Debug,
+      _ => unimplemented!(), // Clap ensures this doesnt happen
+    };
+    let bios_file = bios_file_name_option.map(|rom_filename| {
+      std::fs::read(rom_filename).expect(format!("BIOS file {} not found", rom_filename).as_str())
+    });
+    let mut cpu = cpu::Cpu::new(log_level, bios_file.as_ref().map(|v| &v[..]));
+    let rom_file = std::fs::File::open(rom_filename)
+      .expect(format!("ROM file {} not found", rom_filename).as_str());
+    let rom_file_reader = std::io::BufReader::new(rom_file);
+    cpu.load(rom_file_reader)?;
+    cpu
+  };
 
   if instructions_to_run > 0 {
     for _ in 0..instructions_to_run {
