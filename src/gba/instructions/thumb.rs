@@ -4,8 +4,8 @@
 
 use super::super::{
   cpsr::{borrow_from, carry_from},
-  utils::AsBoolSlice,
   gba::GBA,
+  utils::AsBoolSlice,
 };
 
 pub type ThumbError = String;
@@ -215,7 +215,10 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
-        Some(borrow_from(rd_val, rs_val.overflowing_add((!gba.cpsr.carry_flag()) as u32).0) || overflow2),
+        Some(
+          borrow_from(rd_val, rs_val.overflowing_add((!gba.cpsr.carry_flag()) as u32).0)
+            || overflow2,
+        ),
         Some(overflow || overflow2),
       );
     }
@@ -248,8 +251,12 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     0xA => {
       // CMP (Compare)
-      let (res, overflow) = rd_val.overflowing_sub(rs_val);
-      gba.cpsr.set_all_status_flags(res, Some(borrow_from(rd_val, rs_val)), Some(!overflow));
+      let (res, _) = rd_val.overflowing_sub(rs_val);
+      gba.cpsr.set_all_status_flags(
+        res,
+        Some(borrow_from(rd_val, rs_val)),
+        Some(((rd_val ^ rs_val) as i32) < 0 && ((rs_val ^ res) as i32) >= 0),
+      );
     }
     0xB => {
       // CMN (Compare Negative)
@@ -308,7 +315,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     2 => {
       // MOV
-      gba.regs[rd] = if rs == 15 { gba.regs[15] + 2 } else { gba.regs[rs] };
+      gba.regs[rd] = if rs == 15 { gba.regs[15].overflowing_add(2).0 } else { gba.regs[rs] };
     }
     3 => {
       // Ignore BLX since it's ARMv9
@@ -332,7 +339,8 @@ fn pc_relative_load(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let rd = as_bits_8_to_10(opcode);
   let byte = u32::from(as_low_byte(opcode));
   let offset = byte << 2; // In steps of 4
-  gba.regs[rd] = gba.fetch_u32(((gba.regs[15] + 2) & 0xFFFF_FFFC).overflowing_add(offset).0);
+  gba.regs[rd] =
+    gba.fetch_u32(((gba.regs[15].overflowing_add(2).0) & 0xFFFF_FFFC).overflowing_add(offset).0);
   gba.clocks += 0; // TODO: clocks
   Ok(())
 }
@@ -389,7 +397,7 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
   let offset = u32::from(as_bits_6_to_10(opcode));
   let rb_val = gba.regs[rb];
   if is_byte_else_word {
-    let addr = offset + rb_val;
+    let addr = offset.overflowing_add(rb_val).0;
     if is_load_else_store {
       gba.regs[rd] = u32::from(gba.fetch_byte(addr));
     } else {
@@ -397,7 +405,7 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
     }
   } else {
     let offset = offset << 2;
-    let addr = offset + rb_val;
+    let addr = offset.overflowing_add(rb_val).0;
     if is_load_else_store {
       gba.regs[rd] = gba.fetch_u32(addr);
     } else {
@@ -413,7 +421,7 @@ fn load_or_store_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);
   let offset = as_bits_6_to_10(opcode);
   let offset = u32::from(offset) << 1;
-  let addr = offset + gba.regs[rb];
+  let addr = offset.overflowing_add(gba.regs[rb]).0;
   if is_load_else_store {
     gba.regs[rd] = u32::from(gba.fetch_u16(addr));
     gba.write_u16(addr, gba.regs[rd] as u16);
@@ -427,7 +435,7 @@ fn stack_pointer_relative_load_or_store(gba: &mut GBA, opcode: u16) -> ThumbResu
   let byte = as_low_byte(opcode);
   let offset = u32::from(byte) << 2;
   let rd = as_bits_8_to_10(opcode);
-  let addr = gba.regs[13] + offset;
+  let addr = gba.regs[13].overflowing_add(offset).0;
   if is_load_else_store {
     gba.regs[rd] = gba.fetch_u32(addr);
   } else {
@@ -443,10 +451,10 @@ fn load_address(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let nn = u32::from(byte) << 2;
   let rd = as_bits_8_to_10(opcode);
   gba.regs[rd] = if load_sp_else_pc {
-    gba.regs[13] + nn
+    gba.regs[13].overflowing_add(nn).0
   } else {
     //TODO: Is this right????
-    ((gba.regs[15] + 4) & !2) + nn
+    ((gba.regs[15].overflowing_add(4).0) & !2).overflowing_add(nn).0
   };
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -471,29 +479,23 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let rlist = as_low_byte(opcode);
   let mut sp = gba.regs[13];
   if is_pop_else_push {
-    // TODO: Does this need reversing (So unreversed)? (After the enumerate)
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean).rev() {
-      sp += 4;
-      //println!("pop {:x}:{:x}({})", sp, gba.fetch_u32(sp), 7 - idx);
-      gba.regs[7 - idx] = gba.fetch_u32(sp);
+    for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean) {
+      sp = sp.overflowing_add(4).0;
+      gba.regs[idx] = gba.fetch_u32(sp);
     }
     if pc_or_lr_flag {
-      sp += 4;
-      //println!("OWO");
-      //println!("pop {:x}:{:x}({})", sp, gba.fetch_u32(sp), 15);
+      sp = sp.overflowing_add(4).0;
       gba.regs[15] = gba.fetch_u32(sp) & (!0x0000_0001); // POP PC
     }
   } else {
     if pc_or_lr_flag {
-      //println!("push {:x}:{:x}({})", sp, gba.regs[14], 14);
       gba.write_u32(sp, gba.regs[14]); // PUSH LR
-      sp -= 4;
+      sp = sp.overflowing_sub(4).0;
     }
-    // TODO: Does this need reversing? (After the enumerate)
-    for (idx, _) in rlist.as_bools().iter().enumerate().filter(|(_, &boolean)| boolean) {
-      //println!("push {:x}:{:x}({})", sp, gba.regs[7 - idx], 7 - idx);
-      gba.write_u32(sp, gba.regs[7 - idx]);
-      sp -= 4;
+    for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean).rev()
+    {
+      gba.write_u32(sp, gba.regs[idx]);
+      sp = sp.overflowing_sub(4).0;
     }
   }
   gba.regs[13] = sp;
@@ -506,14 +508,18 @@ fn multiple_loads_or_stores(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let is_load_else_store = as_11th_bit(opcode);
   let rlist = as_low_byte(opcode);
   let mut addr = gba.regs[rb];
-  let operation: fn(&mut GBA, u32, usize)= if is_load_else_store {
-    |gba:&mut GBA, addr, reg| {gba.regs[reg] = gba.fetch_u32(addr);}
+  let operation: fn(&mut GBA, u32, usize) = if is_load_else_store {
+    |gba: &mut GBA, addr, reg| {
+      gba.regs[reg] = gba.fetch_u32(addr);
+    }
   } else {
-    |gba:&mut GBA, addr, reg| {gba.write_u32(addr, gba.regs[reg]);}
+    |gba: &mut GBA, addr, reg| {
+      gba.write_u32(addr, gba.regs[reg]);
+    }
   };
   for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean) {
     operation(gba, addr, idx);
-    addr += 4;
+    addr = addr.overflowing_add(4).0;
   }
   gba.regs[rb] = addr;
   gba.clocks += 0; // TODO: clocks
@@ -532,7 +538,7 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   gba.regs[15] = if is_negative {
     gba.regs[15].overflowing_sub(((!offset) & 0x0000_00FE)).0
   } else {
-    gba.regs[15].overflowing_add(offset + 2).0
+    gba.regs[15].overflowing_add(offset.overflowing_add(2).0).0
   };
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -545,11 +551,15 @@ fn software_interrupt(gba: &mut GBA, opcode: u16) -> ThumbResult {
 }
 /// B
 fn branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
-  //let offset = (opcode & 0x01FF) as u32;
-  let offset = u32::from(as_low_11bits(opcode)) << 1;
-  let is_negative = (opcode & 0x0200) != 0;
-  let pc = (*gba.pc()).overflowing_add(2).0;
-  *gba.pc() = if is_negative { pc.overflowing_sub(offset).0 } else { pc.overflowing_add(offset).0 };
+  let is_negative = (opcode & 0x0000_0400) != 0; // 11th bit
+  let absolute_offset = ((opcode & 0x0000_03FF) as u32) << 1; // first 10 bits
+  let pc = gba.regs[15];
+  gba.regs[15] = if is_negative {
+    // pc.overflowing_sub(absolute_offset).0
+    pc.overflowing_sub((!absolute_offset) & 0x0000_07FE).0
+  } else {
+    pc.overflowing_add(absolute_offset).0.overflowing_add(2).0
+  };
   gba.clocks += 0; // TODO: clocks
   Ok(())
 }
@@ -568,9 +578,9 @@ fn branch_and_link_or_link_and_exchange_first_opcode(gba: &mut GBA, opcode: u16)
 fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16) -> ThumbResult {
   //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
   let lower_offset = u32::from(as_low_11bits(opcode) << 1);
-  let pc = gba.regs[15] + 2;
+  let pc = gba.regs[15].overflowing_add(2).0;
   gba.regs[15] = gba.regs[14].overflowing_add(lower_offset).0;
-  gba.regs[14] = pc - 1;
+  gba.regs[14] = pc.overflowing_sub(1).0;
   gba.clocks += 0; // TODO: clocks
   Ok(())
 }
@@ -606,7 +616,7 @@ fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
 pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ThumbResult {
   let pc = *gba.pc();
   let opcode = gba.fetch_u16(pc);
-  *gba.pc() += 2;
+  *gba.pc() = pc.overflowing_add(2).0;
   (gba.instruction_hook_with_opcode)(gba, u32::from(opcode));
   let instruction = decode_thumb(opcode)?;
   instruction(gba, opcode)?;
