@@ -78,7 +78,8 @@ pub struct GBA {
   /// Mode specific spsrs
   pub(crate) spsrs: [CPSR; 5],
   /// ROM contents
-  game_pak: [u8; 64 * KB],
+  game_pak: Box<[u8; 32 * MB]>,
+  game_pak_sram: [u8; 64 * KB],
   bios_rom: [u8; 16 * KB],
   wram_board: [u8; 256 * KB],
   wram_chip: [u8; 32 * KB],
@@ -98,14 +99,14 @@ impl GBA {
     fn print_opcode(_: &mut GBA, opcode: u32) {
       println!("opcode {}:{:x}", unsafe { COUNT }, opcode);
     }
-    fn print_state_normalized(GBA: &mut GBA) {
-      println!("{}", GBA.state_as_string_without_pc());
+    fn print_state_normalized(gba: &mut GBA) {
+      println!("{}", gba.state_as_string_without_pc());
     }
-    fn print_state(GBA: &mut GBA) {
-      println!("{}", GBA.state_as_string());
+    fn print_state(gba: &mut GBA) {
+      println!("{}", gba.state_as_string());
     }
     // Was still getting stack overflows without box X
-    let mut GBA = box GBA {
+    let mut gba = box GBA {
       output_texture: [0u32; 240 * 160],
       regs: [0u32; 16],
       fiq_only_banks: [[0u32; 5]; 2],
@@ -119,7 +120,8 @@ impl GBA {
       vram: [0u8; 96 * KB],
       oam: [0u8; KB],
       io_mem: [0u8; 1022],
-      game_pak: [0u8; 64 * KB],
+  game_pak: box [0u8; 32 * MB],
+  game_pak_sram: [0u8; 64 * KB],
       clocks: 0u32,
       loaded_rom: None,
       instruction_hook: match log_level {
@@ -133,10 +135,10 @@ impl GBA {
         LogLevel::None => nothing_with_opcode,
       },
     };
-    GBA.reset();
+    gba.reset();
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
-    GBA.bios_rom.clone_from_slice(bios_file);
-    GBA
+    gba.bios_rom.clone_from_slice(bios_file);
+    gba
   }
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
     let mode = self.cpsr.mode();
@@ -216,11 +218,13 @@ impl GBA {
       0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
       //External Memory (Game Pak)
       // TODO: Wait states
+      //0x0200 0000
       0x0800_0000..=0x09FF_FFFF => self.game_pak[addr - 0x0800_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
       0x0A00_0000..=0x0BFF_FFFF => self.game_pak[addr - 0x0A00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
       0x0C00_0000..=0x0DFF_FFFF => self.game_pak[addr - 0x0C00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
       0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr - 0x0E00_0000], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-      _ => unimplemented!("Invalid address: {:x}", addr),
+      //_ => unimplemented!("Invalid address: {:x}", addr),
+      _ => 0u8,
     }
   }
   /// The GBA GBA always runs in LE mode
@@ -310,7 +314,8 @@ impl GBA {
     self.palette_ram = [0u8; KB];
     self.vram = [0u8; 96 * KB];
     self.oam = [0u8; KB];
-    self.game_pak = [0u8; 64 * KB];
+    self.game_pak = box [0u8; 32 * MB];
+    self.game_pak_sram = [0u8; 64 * KB];
     self.clocks = 0u32;
     self.regs[13] = 0x0300_7F00; // Taken from mrgba
   }
