@@ -2,7 +2,12 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use super::super::{cpsr::CPSR, utils::AsBoolSlice, cpu_mode::CpuMode, gba::{GBA, SWI_HANDLER}};
+use super::super::{
+  cpsr::CPSR,
+  cpu_mode::CpuMode,
+  gba::{GBA, SWI_HANDLER},
+  utils::AsBoolSlice,
+};
 
 pub type ARMError = String;
 pub type ARMResult = Result<(), ARMError>;
@@ -128,9 +133,9 @@ fn as_flags(opcode: u32) -> (bool, bool, bool, bool, bool) {
 fn as_extra_flag(opcode: u32) -> bool {
   (opcode & 0x0200_0000) != 0
 }
-/// Branch and Exchange
+/// Branch and Exchange (BX)
 /// If the condition is true, branch and switch mode
-fn BX(gba: &mut GBA, opcode: u32) -> ARMResult {
+fn branch_and_exchange(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 3; // TODO: Clocks
                    // Address to jump to is in a register given by lowest nibble
   let reg_n = opcode & 0x0000_000F;
@@ -144,11 +149,11 @@ fn BX(gba: &mut GBA, opcode: u32) -> ARMResult {
   *gba.pc() = jmp_addr;
   Ok(())
 }
-/// Branch or Branch and link
+/// Branch or Branch and link (B or BL)
 ///
 /// BL is similar to CALL, it stores the return PC (PC+4) in the
 /// LR (Register 14). If using nested functions, that requires pushing LR onto the stack.
-fn B(gba: &mut GBA, opcode: u32) -> ARMResult {
+fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 3; // TODO: Clocks
   let offset = (opcode & 0x007F_FFFF) << 2; //*4
   let is_positive = (opcode & 0x0080_0000) == 0;
@@ -177,8 +182,8 @@ pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Single data swap
-fn SWP(gba: &mut GBA, opcode: u32) -> ARMResult {
+/// Single data swap (SWP)
+fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, is_byte_else_word, _, _) = as_flags(opcode);
   let (rn, rd, _, _, rm) = as_usize_nibbles(opcode);
   if is_byte_else_word {
@@ -196,8 +201,8 @@ fn SWP(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Multiply long
-fn MULL(gba: &mut GBA, opcode: u32) -> ARMResult {
+/// Multiply long (MULL)
+fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
   //TODO: Accumulate?
   let (_, _, signed, accumulate, set_cond_flags) = as_flags(opcode);
   let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
@@ -218,8 +223,8 @@ fn MULL(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Multiply
-fn MUL(gba: &mut GBA, opcode: u32) -> ARMResult {
+/// Multiply (MUL)
+fn multiply(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
@@ -235,10 +240,10 @@ fn MUL(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Halfword Data Transfer Register Offset
+/// Halfword Data Transfer Register Offset (HDT_RO)
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_RO(gba: &mut GBA, opcode: u32) -> ARMResult {
+fn halfword_data_transfer_register_offset(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, _, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
@@ -247,10 +252,10 @@ fn HDT_RO(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   unimplemented!()
 }
-// Halfword Data Transfer Immediate Offset
+// Halfword Data Transfer Immediate Offset (HDT_IO)
 #[allow(unused_variables)]
 #[allow(clippy::many_single_char_names)]
-fn HDT_IO(gba: &mut GBA, opcode: u32) -> ARMResult {
+fn halfword_data_transfer_immediate_offset(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (p, o, _, w, l) = as_flags(opcode);
   let (rn, rd, offset, sh, rm) = as_usize_nibbles(opcode);
   let s = (sh & 0b0100) != 0;
@@ -394,7 +399,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
 }
 /// Data Processing or PSR transfer
 /// This handles all ALU operations
-fn ALU(gba: &mut GBA, opcode: u32) -> ARMResult {
+fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
   let immediate = as_extra_flag(opcode);
   let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
   let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
@@ -590,8 +595,8 @@ fn ALU(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Move to Status Register
-fn MSR(gba: &mut GBA, opcode: u32) -> ARMResult {
+/// Move to Status Register (MSR)
+fn move_to_status_register(gba: &mut GBA, opcode: u32) -> ARMResult {
   const FLAGS_MASK: u32 = 0xFF00_0000;
   const STATE_MASK: u32 = 0x0000_0020;
   const PRIVACY_MASK: u32 = 0x0000_00CF;
@@ -633,8 +638,8 @@ fn MSR(gba: &mut GBA, opcode: u32) -> ARMResult {
   };
   Ok(())
 }
-/// Move to register from status register
-fn MRS(gba: &mut GBA, opcode: u32) -> ARMResult {
+/// Move to register from status register (MRS)
+fn move_to_register_from_status_register(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, use_spsr, _, _) = as_flags(opcode);
   gba.regs[((opcode & 0x0000_F000) >> 12) as usize] = if use_spsr {
     gba
@@ -676,25 +681,25 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
       bits11_4 // TODO: Jump to undef handler
     ),
     ([F, T, _, _, _, _, _, _], _) => single_data_transfer,
-    ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => MUL,
-    ([F, F, F, F, T, _, _, _], [_, _, _, _, T, F, F, T]) => MULL,
-    ([F, F, F, T, F, _, F, F], [F, F, F, F, T, F, F, T]) => SWP,
-    ([F, F, F, _, _, F, _, _], [F, F, F, F, T, _, _, T]) => HDT_RO,
-    ([F, F, F, _, _, T, _, _], [F, F, F, F, T, _, _, T]) => HDT_IO,
+    ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => multiply,
+    ([F, F, F, F, T, _, _, _], [_, _, _, _, T, F, F, T]) => multiply_long,
+    ([F, F, F, T, F, _, F, F], [F, F, F, F, T, F, F, T]) => single_data_swap,
+    ([F, F, F, _, _, F, _, _], [F, F, F, F, T, _, _, T]) => halfword_data_transfer_register_offset,
+    ([F, F, F, _, _, T, _, _], [F, F, F, F, T, _, _, T]) => halfword_data_transfer_immediate_offset,
     ([T, F, F, _, _, _, _, _], _) => block_data_transfer,
     ([T, T, F, _, _, _, _, _], _) => coprocessor_data_transfer,
     ([T, T, T, F, _, _, _, _], [_, _, _, F, _, _, _, _]) => coprocessor_data_operation,
     ([T, T, T, F, _, _, _, _], [_, _, _, T, _, _, _, _]) => coprocessor_register_transfer,
     ([T, T, T, T, _, _, _, _], _) => software_interrupt,
-    ([T, F, T, _, _, _, _, _], _) => B,
+    ([T, F, T, _, _, _, _, _], _) => branch_or_branch_and_link,
     ([F, F, F, T, F, F, T, F], [T, T, T, T, F, F, F, T])
       if (opcode & 0x000F_F000) == 0x000F_F000 =>
     {
-      BX
+      branch_and_exchange
     }
-    ([F, F, _, T, F, _, F, F], [F, F, F, F, F, F, F, F]) => MRS,
-    ([F, F, _, T, F, _, T, F], _) => MSR,
-    ([F, F, _, _, _, _, _, _], _) => ALU,
+    ([F, F, _, T, F, _, F, F], [F, F, F, F, F, F, F, F]) => move_to_register_from_status_register,
+    ([F, F, _, T, F, _, T, F], _) => move_to_status_register,
+    ([F, F, _, _, _, _, _, _], _) => alu_operation,
   })
 }
 
