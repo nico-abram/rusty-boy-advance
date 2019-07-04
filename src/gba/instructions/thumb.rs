@@ -536,7 +536,7 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
     return Ok(());
   }
   gba.regs[15] = if is_negative {
-    gba.regs[15].overflowing_sub(((!offset) & 0x0000_00FE)).0
+    gba.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
   } else {
     gba.regs[15].overflowing_add(offset.overflowing_add(2).0).0
   };

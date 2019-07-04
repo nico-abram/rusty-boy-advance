@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
 use super::super::{
@@ -13,6 +11,7 @@ pub type ARMError = String;
 pub type ARMResult = Result<(), ARMError>;
 pub type ARMInstruction = fn(&mut GBA, u32) -> ARMResult;
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 pub(crate) enum Cond {
   /// Equal (Z)
