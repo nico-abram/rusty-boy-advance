@@ -1,11 +1,11 @@
-use std::time::Instant;
 use glium::{
   glutin::{self, Event, WindowEvent},
   Display, Surface,
 };
-use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
+use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_glium_renderer::GliumRenderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use std::time::Instant;
 
 pub struct System {
   pub events_loop: glutin::EventsLoop,

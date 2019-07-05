@@ -162,7 +162,7 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
   let is_branch_and_link = (opcode & 0x0100_0000) != 0;
   let pc = gba.regs[15];
   if is_branch_and_link {
-    *gba.LR() = pc;
+    gba.regs[14] = pc;
   }
   gba.regs[15] = 4u32
     .overflowing_add(if is_positive {

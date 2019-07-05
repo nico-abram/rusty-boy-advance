@@ -1,22 +1,14 @@
-#![allow(non_snake_case)]
 #![allow(dead_code)]
 
 use alloc::{boxed::Box, format, slice::SliceConcatExt, string::String, vec::Vec};
 
-// Hack so I can "easily" disable a bunch of prints throught the program
-macro_rules! println_maybe {
-  ($($arg:tt)*) => {{
-    let x = format!($($arg)*);
-    //dbg!(x);
-    //println!($($arg)*);
-  }};
-}
-
 use super::{cpsr, cpu_mode, instructions, rom};
-pub use cpsr::CPSR;
-pub use cpu_mode::CpuMode;
 use instructions::{arm, thumb};
-pub use rom::Rom;
+
+use cpsr::CPSR;
+use cpu_mode::CpuMode;
+use rom::Rom;
+
 const KB: usize = 1024;
 const MB: usize = KB * KB;
 
@@ -64,7 +56,7 @@ impl std::error::Error for GBAError {
 }
 pub struct GBA {
   //// Output image
-  output_texture: [u32; 240 * 160],
+  pub(crate) output_texture: [u32; 240 * 160],
   /// Current registers. Swapped on mode change acordingly.
   pub(crate) regs: [u32; 16],
   /// FIQ-only banked registers.
@@ -82,23 +74,23 @@ pub struct GBA {
   /// Mode specific spsrs
   pub(crate) spsrs: [CPSR; 5],
   /// ROM contents
-  game_pak: Box<[u8; 32 * MB]>,
-  game_pak_sram: [u8; 64 * KB],
-  bios_rom: [u8; 16 * KB],
-  wram_board: [u8; 256 * KB],
-  wram_chip: [u8; 32 * KB],
-  palette_ram: [u8; KB],
-  vram: [u8; 96 * KB],
-  oam: [u8; KB],
-  io_mem: [u8; 1022],
+  pub(crate) game_pak: Box<[u8; 32 * MB]>,
+  pub(crate) game_pak_sram: [u8; 64 * KB],
+  pub(crate) bios_rom: [u8; 16 * KB],
+  pub(crate) wram_board: [u8; 256 * KB],
+  pub(crate) wram_chip: [u8; 32 * KB],
+  pub(crate) palette_ram: [u8; KB],
+  pub(crate) vram: [u8; 96 * KB],
+  pub(crate) oam: [u8; KB],
+  pub(crate) io_mem: [u8; 1022],
   pub(crate) clocks: u32,
   instruction_hook: fn(&mut GBA),
   pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
-  loaded_rom: Option<Rom>,
+  pub(crate) loaded_rom: Option<Rom>,
   print_fn: Option<fn(&str) -> ()>,
 }
 impl GBA {
-  pub fn new(
+  pub(crate) fn new(
     log_level: LogLevel,
     bios_file: core::option::Option<&[u8]>,
     print_fn: Option<fn(&str) -> ()>,
@@ -293,9 +285,6 @@ impl GBA {
     self.write_u8(addr + 1, (value >> 8) as u8);
     self.write_u8(addr, value as u8);
   }
-  pub(crate) fn LR(&mut self) -> &mut u32 {
-    self.reg_mut(14)
-  }
   pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
     self.write_u16(addr, value as u16);
     self.write_u16(addr + 2, (value >> 16) as u16);
@@ -401,28 +390,5 @@ impl GBA {
   }
   pub(crate) fn vblank(&mut self) -> u32 {
     self.fetch_u32(0x0300_7FFC)
-  }
-  pub fn video_output(&self) -> &[u32] {
-    &self.output_texture[..]
-  }
-  pub fn loaded_rom(&self) -> Option<&Rom> {
-    self.loaded_rom.as_ref()
-  }
-  pub fn registers(&self) -> [u32; 16] {
-    self.regs
-  }
-  pub fn cpsr(&self) -> CPSR {
-    self.cpsr
-  }
-  pub fn bios_bytes(&self) -> &[u8] {
-    &self.bios_rom[..]
-  }
-  pub fn spsr(&self) -> Option<CPSR> {
-    let mode = self.cpsr.mode();
-    if mode == CpuMode::Privileged || mode == CpuMode::User {
-      None
-    } else {
-      Some(self.spsrs[self.cpsr.mode().as_usize() - 1])
-    }
   }
 }

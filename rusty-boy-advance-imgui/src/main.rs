@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use glium::{
   backend::Facade,
   texture::{ClientFormat, RawImage2d},
@@ -6,7 +5,7 @@ use glium::{
 };
 use imgui::{im_str, Condition, ImString};
 use rusty_boy_advance::{LogLevel, GBA};
-use std::io::Read;
+use std::{borrow::Cow, io::Read};
 
 mod support;
 
@@ -29,7 +28,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut current_browse_memory: fn(&GBA) -> &[u8] = |gba| gba.bios_bytes();
   let mut memory_browse_chunk_size = 4;
   let mut current_rom_file = ImString::with_capacity(128);
-  system.main_loop(|opened, ui, renderer, _display| {
+  system.main_loop(|_, ui, renderer, _display| {
     if running {
       gba.run_one_frame().unwrap();
     }

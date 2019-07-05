@@ -1,8 +1,8 @@
 use beryllium::*;
-use rusty_boy_advance::GBA;
+use rusty_boy_advance::GBABox;
 
 #[allow(clippy::unneeded_field_pattern)]
-pub fn run(mut gba: GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
   let sdl = unsafe { beryllium::init() }?;
   let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT32_DEFAULT)?;
