@@ -4,7 +4,7 @@ use glium::{
   Texture2d,
 };
 use imgui::{im_str, Condition, ImString};
-use rusty_boy_advance::{LogLevel, GBA};
+use rusty_boy_advance::{LogLevel, GBABox};
 use std::{borrow::Cow, io::Read};
 
 mod support;
@@ -12,7 +12,7 @@ mod support;
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
-  let mut gba = GBA::new(LogLevel::None, None, Some(|x| print!("{}", x)));
+  let mut gba = GBABox::new(LogLevel::None, None, Some(|x| print!("{}", x)));
   let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
     let raw = RawImage2d {
@@ -25,7 +25,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   };
   let texture_id = system.renderer.textures().insert(std::rc::Rc::new(gl_texture));
   let mut running = true;
-  let mut current_browse_memory: fn(&GBA) -> &[u8] = |gba| gba.bios_bytes();
+  let mut current_browse_memory: fn(&GBABox) -> &[u8] = |gba| gba.bios_bytes();
   let mut memory_browse_chunk_size = 4;
   let mut current_rom_file = ImString::with_capacity(128);
   system.main_loop(|_, ui, renderer, _display| {

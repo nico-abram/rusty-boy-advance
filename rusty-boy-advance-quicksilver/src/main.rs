@@ -1,4 +1,4 @@
-use rusty_boy_advance::{LogLevel, GBA};
+use rusty_boy_advance::{LogLevel, GBABox};
 
 use quicksilver::{
   geom::Vector,
@@ -8,7 +8,7 @@ use quicksilver::{
 };
 
 struct GameState {
-  gba: GBA,
+  gba: GBABox,
 }
 
 impl State for GameState {
@@ -32,7 +32,7 @@ impl State for GameState {
 }
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-  let mut gba = GBA::new(LogLevel::None, None, Some(|x| print!("{}", x)));
+  let mut gba = GBABox::new(LogLevel::None, None, Some(|x| print!("{}", x)));
   let mut r = Asset::new(quicksilver::load_file("e.gba"));
   r.execute(|rom_file| {
     gba.load(&rom_file[..]).unwrap();
