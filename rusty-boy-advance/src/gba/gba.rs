@@ -98,13 +98,13 @@ impl GBA {
     fn nothing(_: &mut GBA) {}
     fn nothing_with_opcode(_: &mut GBA, _: u32) {}
     fn print_opcode(gba: &mut GBA, opcode: u32) {
-      gba.print_fn.map(|f| f(format!("opcode {}:{:x}", unsafe { COUNT }, opcode).as_str()));
+      gba.print_fn.map(|f| f(format!("opcode {}:{:x}\n", unsafe { COUNT }, opcode).as_str()));
     }
     fn print_state_normalized(gba: &mut GBA) {
-      gba.print_fn.map(|f| f(format!("{}", gba.state_as_string_without_pc()).as_str()));
+      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string_without_pc()).as_str()));
     }
     fn print_state(gba: &mut GBA) {
-      gba.print_fn.map(|f| f(format!("{}", gba.state_as_string()).as_str()));
+      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
     }
     // Was still getting stack overflows without Box X
     let mut gba = box GBA {
