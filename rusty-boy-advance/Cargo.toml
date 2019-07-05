@@ -1,7 +1,7 @@
 [package]
 description = "A Gameboy Advance Emulator (WIP)"
 name = "rusty-boy-advance"
-documentation = "https://nico-abram.github.io/rusty-boy-advance/doc/rusty-boy-advance/"
+documentation = "https://nico-abram.github.io/rusty-boy-advance/doc/rusty_boy_advance/"
 repository = "https://github.com/nico-abram/rusty-boy-advance"
 version = "0.0.3"
 authors = ["Nicolas <abramlujan@gmail.com>"]
