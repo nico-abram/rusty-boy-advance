@@ -3,7 +3,7 @@ use super::cpu_mode::CpuMode;
 /// The CPSR register contains the status flags (Like carry, overfllow, and zero)
 /// , the execution mode (Thumb or Arm) and the cpu mode/priviledges (See [CpuMode])
 #[derive(Copy, Clone)]
-pub(crate) struct CPSR(pub(crate) u32);
+pub struct CPSR(pub(crate) u32);
 fn is_set(x: u32, bit: u32) -> bool {
   (x & bit) == bit
 }
@@ -26,87 +26,87 @@ impl CPSR {
   }
   /// Sign(Negative) (N)
   #[inline]
-  pub(crate) fn negative_flag(self) -> bool {
+  pub fn negative_flag(self) -> bool {
     self.is_set(0x8000_0000)
   }
   /// Sign(Negative) (N)
   #[inline]
-  pub(crate) fn set_negative_flag(&mut self, v: bool) {
+  pub fn set_negative_flag(&mut self, v: bool) {
     self.set(0x8000_0000, v)
   }
   /// Zero (Z)
   #[inline]
-  pub(crate) fn zero_flag(self) -> bool {
+  pub fn zero_flag(self) -> bool {
     self.is_set(0x4000_0000)
   }
   /// Zero (Z)
   #[inline]
-  pub(crate) fn set_zero_flag(&mut self, v: bool) {
+  pub fn set_zero_flag(&mut self, v: bool) {
     self.set(0x4000_0000, v)
   }
   /// Carry (C)
   #[inline]
-  pub(crate) fn carry_flag(self) -> bool {
+  pub fn carry_flag(self) -> bool {
     self.is_set(0x2000_0000)
   }
   /// Carry (C)
   #[inline]
-  pub(crate) fn set_carry_flag(&mut self, v: bool) {
+  pub fn set_carry_flag(&mut self, v: bool) {
     self.set(0x2000_0000, v)
   }
   /// Overflow (V)
   #[inline]
-  pub(crate) fn overflow_flag(self) -> bool {
+  pub fn overflow_flag(self) -> bool {
     self.is_set(0x1000_0000)
   }
   /// Overflow (V)
   #[inline]
-  pub(crate) fn set_overflow_flag(&mut self, v: bool) {
+  pub fn set_overflow_flag(&mut self, v: bool) {
     self.set(0x1000_0000, v)
   }
   /// IRQ disabled (I)
   #[inline]
-  pub(crate) fn irq_disabled_flag(self) -> bool {
+  pub fn irq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0080)
   }
   /// Disable IRQ (I)
   #[inline]
-  pub(crate) fn set_irq_disabled_flag(&mut self, v: bool) {
+  pub fn set_irq_disabled_flag(&mut self, v: bool) {
     self.set(0x0000_0080, v)
   }
   /// Fiq disabled (F)
   #[inline]
-  pub(crate) fn fiq_disabled_flag(self) -> bool {
+  pub fn fiq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0040)
   }
   /// Disable Fiq (F)
   #[inline]
-  pub(crate) fn set_fiq_disabled_flag(&mut self, v: bool) {
+  pub fn set_fiq_disabled_flag(&mut self, v: bool) {
     self.set(0x0000_0040, v)
   }
   /// State/Thumb (thumb=1/true)
   #[inline]
-  pub(crate) fn thumb_state_flag(self) -> bool {
+  pub fn thumb_state_flag(self) -> bool {
     self.is_set(0x0000_0020)
   }
   /// State/Thumb (thumb=1/true)
   #[inline]
-  pub(crate) fn set_thumb_state_flag(&mut self, v: bool) {
+  pub fn set_thumb_state_flag(&mut self, v: bool) {
     self.set(0x0000_0020, v)
   }
   /// Get priviledge mode
   #[inline]
-  pub(crate) fn mode(self) -> CpuMode {
+  pub fn mode(self) -> CpuMode {
     CpuMode::from_byte((self.0 & 0x0000_001F) as u8)
   }
   /// Set priviledge mode
   #[inline]
-  pub(crate) fn set_mode(&mut self, new_mode: CpuMode) {
+  pub fn set_mode(&mut self, new_mode: CpuMode) {
     self.0 = (self.0 & 0xFFFF_FFE0) | u32::from(new_mode.as_byte());
   }
 
   #[inline]
-  pub(crate) fn addition_carries(res: u32, op1: u32, op2: u32) -> bool {
+  pub fn addition_carries(res: u32, op1: u32, op2: u32) -> bool {
     carry_from(op1, op2, res)
     /*
     ((op1 & 0x8000_0000) != 0 && (op2 & 0x8000_0000) != 0)

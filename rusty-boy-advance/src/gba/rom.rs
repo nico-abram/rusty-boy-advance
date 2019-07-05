@@ -11,4 +11,13 @@ impl Rom {
     }
     rom
   }
+  pub fn game_pak(&self) -> &[u8] {
+    &self.game_pak[..]
+  }
+  pub fn title(&self) -> &str {
+    self.title.as_str()
+  }
+  pub fn code(&self) -> &str {
+    self.code.as_str()
+  }
 }

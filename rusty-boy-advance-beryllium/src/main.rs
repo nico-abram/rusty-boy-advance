@@ -1,10 +1,6 @@
-#![feature(box_syntax)]
-#![feature(test)]
-#![allow(dead_code)]
-
 use clap::{App, Arg};
+use rusty_boy_advance::{LogLevel, GBA};
 
-mod gba;
 mod renderer;
 
 #[allow(clippy::expect_fun_call)]
@@ -80,38 +76,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let rom_filename = matches.value_of("rom").unwrap();
   let headless = matches.is_present("headless");
 
-  let mut cpu = {
+  let mut gba = {
     let log_level = match log_level {
-      0 => gba::LogLevel::None,
-      1 => gba::LogLevel::NormalizedEveryInstruction,
-      2 => gba::LogLevel::Debug,
+      0 => LogLevel::None,
+      1 => LogLevel::NormalizedEveryInstruction,
+      2 => LogLevel::Debug,
       _ => unimplemented!(), // Clap ensures this doesnt happen
     };
     let bios_file = bios_file_name_option.map(|rom_filename| {
       std::fs::read(rom_filename).expect(format!("BIOS file {} not found", rom_filename).as_str())
     });
-    let mut cpu = gba::GBA::new(log_level, bios_file.as_ref().map(|v| &v[..]));
+    let mut gba = GBA::new(log_level, bios_file.as_ref().map(|v| &v[..]));
     let rom_file = std::fs::File::open(rom_filename)
       .expect(format!("ROM file {} not found", rom_filename).as_str());
     let rom_file_reader = std::io::BufReader::new(rom_file);
-    cpu.load(rom_file_reader)?;
-    cpu
+    gba.load(rom_file_reader)?;
+    gba
   };
 
   if instructions_to_run > 0 {
     for _ in 0..instructions_to_run {
-      cpu.run_one_instruction()?;
+      gba.run_one_instruction()?;
     }
   } else if headless {
     if frames_to_run != 0 {
       for _ in 0..frames_to_run {
-        cpu.run_one_frame()?;
+        gba.run_one_frame()?;
       }
     } else {
-      cpu.run_forever()?;
+      gba.run_forever()?;
     }
   } else {
-    renderer::run(&mut cpu, frames_to_run)?;
+    renderer::run(gba, frames_to_run)?;
   }
   Ok(())
 }

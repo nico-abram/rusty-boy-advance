@@ -1,0 +1,18 @@
+[package]
+description = "A Gameboy Advance Emulator (WIP)"
+name = "rusty-boy-advance-quicksilver"
+documentation = "https://nico-abram.github.io/rusty-boy-advance-quicksilver/"
+repository = "https://github.com/nico-abram/rusty-boy-advance"
+version = "0.0.2"
+authors = ["Nicolas <abramlujan@gmail.com>"]
+edition = "2018"
+
+readme = "README.md"
+keywords = ["emulator", "gba", "game-boy"]
+categories = ["emulators"]
+license = "MIT"
+publish = false
+
+[dependencies]
+rusty-boy-advance = { path = "../rusty-boy-advance" }
+quicksilver = "0.3.15"

@@ -1,0 +1,20 @@
+[package]
+description = "A Gameboy Advance Emulator (WIP)"
+name = "rusty-boy-advance"
+documentation = "https://nico-abram.github.io/rusty-boy-advance/doc/rusty-boy-advance/"
+repository = "https://github.com/nico-abram/rusty-boy-advance"
+version = "0.0.2"
+authors = ["Nicolas <abramlujan@gmail.com>"]
+edition = "2018"
+
+readme = "../README.md"
+keywords = ["emulator", "gba", "game-boy"]
+categories = ["emulators"]
+license = "MIT"
+
+[dependencies]
+#byteorder = "1.3.2"
+
+[badges]
+travis-ci = { repository = "nico-abram/rusty-boy-advance", branch = "master" }
+maintenance = { status = "actively-developed" }

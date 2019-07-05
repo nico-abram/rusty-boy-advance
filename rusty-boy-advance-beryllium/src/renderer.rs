@@ -1,8 +1,8 @@
-use crate::gba::GBA;
 use beryllium::*;
+use rusty_boy_advance::GBA;
 
 #[allow(clippy::unneeded_field_pattern)]
-pub fn run(cpu: &mut GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(mut gba: GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
   let sdl = unsafe { beryllium::init() }?;
   let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT32_DEFAULT)?;
@@ -49,9 +49,9 @@ pub fn run(cpu: &mut GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::
       }
     }
     if frames_to_run == 0 {
-      cpu.run_one_frame()?;
+      gba.run_one_frame()?;
     } else {
-      cpu.run_one_frame()?;
+      gba.run_one_frame()?;
       frames_left_to_run -= 1;
       if frames_left_to_run == 0 {
         println!(
@@ -68,6 +68,7 @@ pub fn run(cpu: &mut GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::
     // out of bounds, etc. This method doesn't know your target pixel format,
     // you just get a byte pointer and you have to cast it to the type for the
     // size of pixel data you're working with.
+    let output = gba.video_output();
     unsafe {
       #[allow(clippy::cast_ptr_alignment)]
       surface.lock_edit(|ptr| {
@@ -77,7 +78,7 @@ pub fn run(cpu: &mut GBA, frames_to_run: u32) -> Result<(), Box<dyn std::error::
             // Note: pitch values are provided **in bytes**, so cast to the pixel
             // type after you offset to the start of the target row.
             let row_ptr = ptr.add(y * pitch) as *mut u32;
-            row_ptr.add(x).write(cpu.output_texture[x * 160 + y]);
+            row_ptr.add(x).write(output[x * 160 + y]);
           }
         }
       })?;

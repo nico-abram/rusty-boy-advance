@@ -2,7 +2,7 @@
 /// is related to priviledges and currently in use
 /// register banks)
 #[derive(PartialEq, Copy, Clone, Debug)]
-pub(crate) enum CpuMode {
+pub enum CpuMode {
   User,
   FIQ,
   IRQ,
@@ -66,5 +66,16 @@ impl CpuMode {
       0b11111 => CpuMode::Privileged,
       x => unimplemented!("Invalid cpu mode flag {:x?}", x),
     }
+  }
+}
+
+impl std::fmt::Display for CpuMode {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    std::fmt::Debug::fmt(self, f)
+  }
+}
+impl std::fmt::LowerHex for CpuMode {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(f, "{:x}", self.as_byte())
   }
 }

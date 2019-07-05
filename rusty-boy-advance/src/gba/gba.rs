@@ -11,11 +11,10 @@ macro_rules! println_maybe {
 }
 
 use super::{cpsr, cpu_mode, instructions, rom};
-use cpsr::CPSR;
-use cpu_mode::CpuMode;
+pub use cpsr::CPSR;
+pub use cpu_mode::CpuMode;
 use instructions::{arm, thumb};
-use rom::Rom;
-
+pub use rom::Rom;
 const KB: usize = 1024;
 const MB: usize = KB * KB;
 
@@ -60,7 +59,7 @@ impl std::error::Error for GBAError {
 }
 pub struct GBA {
   //// Output image
-  pub output_texture: [u32; 240 * 160],
+  output_texture: [u32; 240 * 160],
   /// Current registers. Swapped on mode change acordingly.
   pub(crate) regs: [u32; 16],
   /// FIQ-only banked registers.
@@ -107,7 +106,7 @@ impl GBA {
     }
     // Was still getting stack overflows without box X
     let mut gba = box GBA {
-      output_texture: [0u32; 240 * 160],
+      output_texture: [0xFF00_0000u32; 240 * 160],
       regs: [0u32; 16],
       fiq_only_banks: [[0u32; 5]; 2],
       all_modes_banks: [[0u32; 2]; 6],
@@ -120,8 +119,8 @@ impl GBA {
       vram: [0u8; 96 * KB],
       oam: [0u8; KB],
       io_mem: [0u8; 1022],
-  game_pak: box [0u8; 32 * MB],
-  game_pak_sram: [0u8; 64 * KB],
+      game_pak: box [0u8; 32 * MB],
+      game_pak_sram: [0u8; 64 * KB],
       clocks: 0u32,
       loaded_rom: None,
       instruction_hook: match log_level {
@@ -299,7 +298,7 @@ impl GBA {
   pub fn reset(&mut self) {
     self.regs = [0; 16];
     *self.pc() = RESET_HANDLER;
-    self.output_texture = [0u32; 240 * 160];
+    self.output_texture = [0xFF00_0000u32; 240 * 160];
     self.fiq_only_banks = [[0u32; 5]; 2];
     self.all_modes_banks = [[0u32; 2]; 6];
     self.io_mem = [0u8; 1022];
@@ -347,7 +346,7 @@ impl GBA {
     format!(
       "{}\n{}",
       self
-        .regs 
+        .regs
         .iter()
         .enumerate()
         .take(15)
@@ -396,5 +395,28 @@ impl GBA {
   }
   pub(crate) fn vblank(&mut self) -> u32 {
     self.fetch_u32(0x0300_7FFC)
+  }
+  pub fn video_output(&self) -> &[u32] {
+    &self.output_texture[..]
+  }
+  pub fn loaded_rom(&self) -> Option<&Rom> {
+    self.loaded_rom.as_ref()
+  }
+  pub fn registers(&self) -> [u32; 16] {
+    self.regs
+  }
+  pub fn cpsr(&self) -> CPSR {
+    self.cpsr
+  }
+  pub fn bios_bytes(&self) -> &[u8] {
+    &self.bios_rom[..]
+  }
+  pub fn spsr(&self) -> Option<CPSR> {
+    let mode = self.cpsr.mode();
+    if mode == CpuMode::Privileged || mode == CpuMode::User {
+      None
+    } else {
+      Some(self.spsrs[self.cpsr.mode().as_usize() - 1])
+    }
   }
 }
