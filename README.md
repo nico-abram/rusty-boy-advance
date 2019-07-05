@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/nico-abram/rusty-boy-advance.svg?branch=master)](https://travis-ci.com/nico-abram/rusty-boy-advance)
 
-**_[docs](https://nico-abram.github.io/rusty-boy-advance/doc/rgba/)_**
+**_[docs](https://nico-abram.github.io/rusty-boy-advance/doc/rusty_boy_advance/)_**
 
 An attempt at a Game Boy Advance emulator in rust (Very much a WIP).
 
