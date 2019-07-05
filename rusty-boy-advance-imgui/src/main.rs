@@ -3,7 +3,7 @@ use glium::{
   texture::{ClientFormat, RawImage2d},
   Texture2d,
 };
-use imgui::{im_str, Condition};
+use imgui::{im_str, Condition, ImString};
 use rusty_boy_advance::{LogLevel, GBA};
 use std::borrow::Cow;
 
@@ -13,10 +13,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
   let mut gba = GBA::new(LogLevel::None, None);
-  let rom_file = std::fs::File::open("e.gba").unwrap();
-  let rom_file_reader = std::io::BufReader::new(rom_file);
-  gba.load(rom_file_reader)?;
-  let mut system = support::init("Rusty Boy Advance ImGui Glium");
+  let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
     let raw = RawImage2d {
       data: Cow::Owned(gba.video_output().into()),
@@ -27,30 +24,32 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Texture2d::new(system.display.get_context(), raw).unwrap()
   };
   let texture_id = system.renderer.textures().insert(std::rc::Rc::new(gl_texture));
-  let mut running = false;
+  let mut running = true;
   let mut current_browse_memory: fn(&GBA) -> &[u8] = |gba| gba.bios_bytes();
   let mut memory_browse_chunk_size = 4;
+  let mut current_rom_file = ImString::with_capacity(128);
   system.main_loop(|opened, ui, renderer, _display| {
     if running {
       gba.run_one_frame().unwrap();
     }
-    let rom_name = gba.loaded_rom().unwrap().title();
-    ui.window(unsafe {
-      imgui::ImStr::from_utf8_with_nul_unchecked(format!("{}\0", rom_name).as_str().as_bytes())
-    })
-    .position([400.0, 0.0], Condition::Appearing)
-    .always_auto_resize(true)
-    .build(|| {
-      let texture = renderer.textures().get(texture_id).unwrap();
-      let raw = RawImage2d {
-        data: Cow::Owned(gba.video_output().into()),
-        width: WIDTH as u32,
-        height: HEIGHT as u32,
-        format: ClientFormat::U8U8U8U8,
-      };
-      texture.write(glium::Rect { left: 0, bottom: 0, width: WIDTH, height: HEIGHT }, raw);
-      ui.image(texture_id, [WIDTH as f32, HEIGHT as f32]).build();
-    });
+    if let Some(rom_name) = gba.loaded_rom().map(|rom| rom.title()) {
+      ui.window(unsafe {
+        imgui::ImStr::from_utf8_with_nul_unchecked(format!("{}\0", rom_name).as_str().as_bytes())
+      })
+      .position([400.0, 0.0], Condition::Appearing)
+      .always_auto_resize(true)
+      .build(|| {
+        let texture = renderer.textures().get(texture_id).unwrap();
+        let raw = RawImage2d {
+          data: Cow::Owned(gba.video_output().into()),
+          width: WIDTH as u32,
+          height: HEIGHT as u32,
+          format: ClientFormat::U8U8U8U8,
+        };
+        texture.write(glium::Rect { left: 0, bottom: 0, width: WIDTH, height: HEIGHT }, raw);
+        ui.image(texture_id, [WIDTH as f32, HEIGHT as f32]).build();
+      });
+    }
     ui.window(im_str!("CPU State"))
       .size([200.0, 305.0], Condition::Appearing)
       .resizable(false)
@@ -89,6 +88,20 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
         }
       });
+    ui.window(im_str!("ROM Loading"))
+      .position([0.0, 350.0], Condition::Appearing)
+      .always_auto_resize(true)
+      .build(|| {
+        ui.input_text(im_str!("file"), &mut current_rom_file).build();
+        if ui.button(im_str!("Load and Reset"), [100.0, 50.0]) {
+          let rom_file =
+            unsafe { std::ffi::CStr::from_ptr(current_rom_file.as_ptr()) }.to_str().unwrap();
+          if let Ok(rom_file) = std::fs::File::open(rom_file) {
+            let rom_file_reader = std::io::BufReader::new(rom_file);
+            gba.load(rom_file_reader);
+          }
+        }
+      });
     ui.window(im_str!("Memory"))
       .position([0.0, 350.0], Condition::Appearing)
       .always_auto_resize(true)
@@ -123,6 +136,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           });
       });
     //ui.show_demo_window(opened);
+    //ui.show_metrics_window(opened);
   });
   Ok(())
 }

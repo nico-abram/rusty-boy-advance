@@ -4,5 +4,5 @@ members = [
     "rusty-boy-advance-beryllium",
     "rusty-boy-advance",
     "rusty-boy-advance-quicksilver",
-    "rusty-boy-advance-imgui-glium",
+    "rusty-boy-advance-imgui",
 ]
