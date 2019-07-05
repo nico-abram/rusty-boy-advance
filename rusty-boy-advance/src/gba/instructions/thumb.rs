@@ -8,6 +8,9 @@ use super::super::{
   utils::AsBoolSlice,
 };
 
+use alloc::format;
+use alloc::string::String;
+
 pub type ThumbError = String;
 pub type ThumbResult = Result<(), ThumbError>;
 pub type ThumbInstruction = fn(&mut GBA, u16) -> ThumbResult;
@@ -69,7 +72,7 @@ fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
     1 => operand >> offset,
     2 => ((operand as i32) >> offset) as u32,
     3 => unimplemented!("reserved"),
-    _ => unimplemented!("Impossible?"), //std::hint::unreachable_unchecked()
+    _ => unimplemented!("Impossible?"), //core::hint::unreachable_unchecked()
   };
   gba.regs[rd] = res;
   gba.cpsr.set_all_status_flags(
@@ -142,7 +145,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
       res
     }
-    _ => unimplemented!(), //std::hint::unreachable_unchecked()
+    _ => unimplemented!(), //core::hint::unreachable_unchecked()
   };
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -329,7 +332,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
       }
     }
-    _ => unimplemented!("Impossible"), //std::hint::unreachable_unchecked()
+    _ => unimplemented!("Impossible"), //core::hint::unreachable_unchecked()
   }
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -370,7 +373,6 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let sign_extend = (opcode & 0x0400) != 0;
   let addr = gba.regs[rb].overflowing_add(gba.regs[ro]).0;
-  println!("ohayo h:{} ro:{} rb:{} rd:{} sign extend:{} addr:{}", H, ro, rb, rd, sign_extend, addr);
   if !H && !sign_extend {
     gba.write_u16(addr, gba.regs[rd] as u16);
     gba.clocks += 0; // TODO: clocks

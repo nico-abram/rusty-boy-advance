@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use alloc::format;
+use alloc::string::String;
+
 use super::super::{
   cpsr::CPSR,
   cpu_mode::CpuMode,
@@ -67,7 +70,7 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
     0xD => Cond::LE,
     0xE => Cond::AL,
     0xF => Cond::NV,
-    _ => panic!("This is impossible"), //std::hint::unreachable_unchecked()
+    _ => panic!("This is impossible"), //core::hint::unreachable_unchecked()
   }
 }
 /// Check if the condition for the given opcode is true
@@ -460,7 +463,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         2 => (
           (register_value as i32).overflowing_shr(shift_amount).0 as u32,
           if shift_amount != 0 {
-            Some(((register_value >> (std::cmp::max(shift_amount, 32) - 1)) & 1) != 0)
+            Some(((register_value >> (core::cmp::max(shift_amount, 32) - 1)) & 1) != 0)
           } else {
             None
           },

@@ -1,3 +1,7 @@
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
 pub struct Rom {
   game_pak: [u8; 64 * 1024],
   title: String,

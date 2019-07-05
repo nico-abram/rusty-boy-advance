@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use glium::{
   backend::Facade,
   texture::{ClientFormat, RawImage2d},
@@ -5,14 +6,14 @@ use glium::{
 };
 use imgui::{im_str, Condition, ImString};
 use rusty_boy_advance::{LogLevel, GBA};
-use std::borrow::Cow;
+use std::io::Read;
 
 mod support;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
-  let mut gba = GBA::new(LogLevel::None, None);
+  let mut gba = GBA::new(LogLevel::None, None, Some(|x| print!("{}", x)));
   let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
     let raw = RawImage2d {
@@ -96,9 +97,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.button(im_str!("Load and Reset"), [100.0, 50.0]) {
           let rom_file =
             unsafe { std::ffi::CStr::from_ptr(current_rom_file.as_ptr()) }.to_str().unwrap();
-          if let Ok(rom_file) = std::fs::File::open(rom_file) {
-            let rom_file_reader = std::io::BufReader::new(rom_file);
-            gba.load(rom_file_reader);
+          if let Ok(mut rom_file) = std::fs::File::open(rom_file) {
+            let mut contents = Vec::with_capacity(32 * 1024 * 1024);
+            rom_file.read_to_end(&mut contents);
+            gba.load(&contents[..]);
           }
         }
       });

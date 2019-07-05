@@ -13,7 +13,7 @@ categories = ["emulators"]
 license = "MIT"
 publish = false
 
-default-run = "rusty-boy-advance-beryllium"
+#default-run = "rusty-boy-advance-beryllium"
 
 [dependencies]
 rusty-boy-advance = { path = "../rusty-boy-advance" }

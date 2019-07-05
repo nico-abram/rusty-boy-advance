@@ -32,7 +32,7 @@ impl State for GameState {
 }
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-  let mut gba = GBA::new(LogLevel::None, None);
+  let mut gba = GBA::new(LogLevel::None, None, Some(|x| print!("{}", x)));
   let mut r = Asset::new(quicksilver::load_file("e.gba"));
   r.execute(|rom_file| {
     gba.load(&rom_file[..]).unwrap();

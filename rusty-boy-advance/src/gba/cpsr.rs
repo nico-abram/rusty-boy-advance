@@ -146,8 +146,8 @@ impl CPSR {
     self.set_neutral_flags(res);
   }
 }
-impl std::fmt::Display for CPSR {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for CPSR {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(
       f,
       "N:{} C:{} Z:{} V:{} I:{} F:{} T:{} mode:{:x?}",

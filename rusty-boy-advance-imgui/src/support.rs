@@ -1,3 +1,4 @@
+use std::time::Instant;
 use glium::{
   glutin::{self, Event, WindowEvent},
   Display, Surface,
@@ -5,7 +6,6 @@ use glium::{
 use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::GliumRenderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use std::time::Instant;
 
 pub struct System {
   pub events_loop: glutin::EventsLoop,
@@ -52,7 +52,10 @@ pub fn init(title: &str) -> System {
 }
 
 impl System {
-  pub fn main_loop<F: FnMut(&mut bool, &mut Ui, &mut GliumRenderer, & glium::Display)>(self, mut run_ui: F) {
+  pub fn main_loop<F: FnMut(&mut bool, &mut Ui, &mut GliumRenderer, &glium::Display)>(
+    self,
+    mut run_ui: F,
+  ) {
     let System { mut events_loop, display, mut imgui, mut platform, mut renderer, .. } = self;
     let gl_window = display.gl_window();
     let window = gl_window.window();

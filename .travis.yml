@@ -52,6 +52,8 @@ script:
   - rustup target add $ARCH
   - cargo build --target=$ARCH
   - cargo test --target=$ARCH
+  #test no-std
+  - cargo test --target=$ARCH --lib rusty-boy-advance --no-default-features
   - cargo bench --target=$ARCH
   - |
     if [ $ARCH == "x86_64-unknown-linux-gnu" ]; then

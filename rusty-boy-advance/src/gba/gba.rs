@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+use alloc::{boxed::Box, format, slice::SliceConcatExt, string::String, vec::Vec};
+
 // Hack so I can "easily" disable a bunch of prints throught the program
 macro_rules! println_maybe {
   ($($arg:tt)*) => {{
@@ -38,20 +40,23 @@ pub enum LogLevel {
 pub enum GBAError {
   ARM(arm::ARMError),
   Thumb(thumb::ThumbError),
+  InvalidRom,
 }
 impl GBAError {
   fn as_string(&self) -> &str {
     match self {
       GBAError::ARM(err) => err,
       GBAError::Thumb(err) => err,
+      GBAError::InvalidRom => "Invalid ROM",
     }
   }
 }
-impl std::fmt::Display for GBAError {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for GBAError {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(f, "{}", self.as_string())
   }
 }
+#[cfg(feature = "std")]
 impl std::error::Error for GBAError {
   fn description(&self) -> &str {
     self.as_string()
@@ -90,21 +95,26 @@ pub struct GBA {
   instruction_hook: fn(&mut GBA),
   pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
   loaded_rom: Option<Rom>,
+  print_fn: Option<fn(&str) -> ()>,
 }
 impl GBA {
-  pub fn new(log_level: LogLevel, bios_file: std::option::Option<&[u8]>) -> Box<Self> {
+  pub fn new(
+    log_level: LogLevel,
+    bios_file: core::option::Option<&[u8]>,
+    print_fn: Option<fn(&str) -> ()>,
+  ) -> Box<Self> {
     fn nothing(_: &mut GBA) {}
     fn nothing_with_opcode(_: &mut GBA, _: u32) {}
-    fn print_opcode(_: &mut GBA, opcode: u32) {
-      println!("opcode {}:{:x}", unsafe { COUNT }, opcode);
+    fn print_opcode(gba: &mut GBA, opcode: u32) {
+      gba.print_fn.map(|f| f(format!("opcode {}:{:x}", unsafe { COUNT }, opcode).as_str()));
     }
     fn print_state_normalized(gba: &mut GBA) {
-      println!("{}", gba.state_as_string_without_pc());
+      gba.print_fn.map(|f| f(format!("{}", gba.state_as_string_without_pc()).as_str()));
     }
     fn print_state(gba: &mut GBA) {
-      println!("{}", gba.state_as_string());
+      gba.print_fn.map(|f| f(format!("{}", gba.state_as_string()).as_str()));
     }
-    // Was still getting stack overflows without box X
+    // Was still getting stack overflows without Box X
     let mut gba = box GBA {
       output_texture: [0xFF00_0000u32; 240 * 160],
       regs: [0u32; 16],
@@ -133,6 +143,7 @@ impl GBA {
         LogLevel::NormalizedEveryInstruction => print_opcode,
         LogLevel::None => nothing_with_opcode,
       },
+      print_fn: print_fn,
     };
     gba.reset();
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
@@ -174,7 +185,7 @@ impl GBA {
     let new_idx = new_mode.as_usize();
     let old_idx = old_mode.as_usize();
     // TODO:
-    // std::mem::swap(x: &mut T, y: &mut T); // Can I use mem swap here?
+    // core::mem::swap(x: &mut T, y: &mut T); // Can I use mem swap here?
     self.all_modes_banks[old_idx][0] = self.regs[13];
     self.all_modes_banks[old_idx][1] = self.regs[14];
     self.regs[13] = self.all_modes_banks[new_idx][0];
@@ -208,7 +219,7 @@ impl GBA {
       //I/O Registers             (1022 Bytes)
       0x0400_0000..=0x0400_03FE => self.io_mem[addr - 0x0400_0000], //TODO:IO
       0x0400_4000..=0x04FF_FFFF => {
-        dbg!("Bad io read at {:x}", addr);
+        self.print_fn.map(|f| f(format!("Bad io read at {:x}", addr).as_str()));
         0
       }
       //Internal Display Memory
@@ -319,24 +330,19 @@ impl GBA {
     self.regs[13] = 0x0300_7F00; // Taken from mrgba
   }
   /// Load a ROM from a reader
-  pub fn load<T: std::io::Read>(
-    &mut self,
-    mut reader: T,
-  ) -> Result<(), Box<dyn std::error::Error>> {
+  pub fn load(&mut self, rom_bytes: &[u8]) -> Result<(), Box<GBAError>> {
     self.reset();
-    let mut buf = Vec::with_capacity(16 * MB);
-    reader.read_to_end(&mut buf)?;
     //TODO: Verify nintendo logo?
-    let title = &buf[0x00A0..0x00AC];
+    let title = &rom_bytes[0x00A0..0x00AC];
     let title =
       if let Some(idx) = title.iter().position(|x| *x == 0) { &title[0..idx] } else { title };
-    let title = String::from_utf8(title.to_vec())?;
-    let code = &buf[0x00AC..0x00B0];
-    let code = String::from_utf8(code.to_vec())?;
-    for (input, out) in buf.iter().zip(self.game_pak.iter_mut()) {
+    let title = String::from_utf8(title.to_vec()).map_err(|_| GBAError::InvalidRom)?;
+    let code = &rom_bytes[0x00AC..0x00B0];
+    let code = String::from_utf8(code.to_vec()).map_err(|_| GBAError::InvalidRom)?;
+    for (input, out) in rom_bytes.iter().zip(self.game_pak.iter_mut()) {
       *out = *input;
     }
-    self.loaded_rom = Some(Rom::new(buf, title, code));
+    self.loaded_rom = Some(Rom::new(Vec::from(rom_bytes), title, code));
     Ok(())
   }
   pub(crate) fn thumb(&mut self) -> bool {

@@ -69,13 +69,13 @@ impl CpuMode {
   }
 }
 
-impl std::fmt::Display for CpuMode {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    std::fmt::Debug::fmt(self, f)
+impl core::fmt::Display for CpuMode {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    core::fmt::Debug::fmt(self, f)
   }
 }
-impl std::fmt::LowerHex for CpuMode {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::LowerHex for CpuMode {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(f, "{:x}", self.as_byte())
   }
 }
