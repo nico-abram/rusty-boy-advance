@@ -483,24 +483,30 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let pc_or_lr_flag = (opcode & 0x0100) != 0;
   let rlist = as_low_byte(opcode);
   let mut sp = gba.regs[13];
+  // GBATEK says "In THUMB mode stack is always meant to be 'full descending',
+  // ie. PUSH is equivalent to 'STMFD/STMDB' and POP to 'LDMFD/LDMIA' in ARM mode."
+  // And http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0068b/Cacbgchh.html says
+  // "The stack pointer can either point to the last item in the stack (a full stack), or the next
+  // free space on the stack (an empty stack)."
+  // So we assume sp is "empty" a.k.a pop= post-index and push = pre-index
   if is_pop_else_push {
     for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean) {
-      sp = sp.overflowing_add(4).0;
       gba.regs[idx] = gba.fetch_u32(sp);
+      sp = sp.overflowing_add(4).0;
     }
     if pc_or_lr_flag {
-      sp = sp.overflowing_add(4).0;
       gba.regs[15] = gba.fetch_u32(sp) & (!0x0000_0001); // POP PC
+      sp = sp.overflowing_add(4).0;
     }
   } else {
     if pc_or_lr_flag {
-      gba.write_u32(sp, gba.regs[14]); // PUSH LR
       sp = sp.overflowing_sub(4).0;
+      gba.write_u32(sp, gba.regs[14]); // PUSH LR
     }
     for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean).rev()
     {
-      gba.write_u32(sp, gba.regs[idx]);
       sp = sp.overflowing_sub(4).0;
+      gba.write_u32(sp, gba.regs[idx]);
     }
   }
   gba.regs[13] = sp;

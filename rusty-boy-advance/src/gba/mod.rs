@@ -25,11 +25,8 @@ impl GBABox {
   ) -> Self {
     GBABox { internal_gba: gba::GBA::new(log_level, bios_file, print_fn) }
   }
-  pub fn video_output(&self) -> &[u32] {
+  pub fn video_output(&self) -> &[u8] {
     &self.internal_gba.output_texture[..]
-  }
-  pub fn vram(&self) -> &[u8] {
-    &self.vram[..]
   }
   pub fn loaded_rom(&self) -> Option<&Rom> {
     self.internal_gba.loaded_rom.as_ref()
@@ -40,8 +37,20 @@ impl GBABox {
   pub fn cpsr(&self) -> CPSR {
     self.cpsr
   }
+  pub fn vram_bytes(&self) -> &[u8] {
+    &self.vram[..]
+  }
   pub fn chip_wram_bytes(&self) -> &[u8] {
     &self.internal_gba.wram_chip[..]
+  }
+  pub fn board_wram_bytes(&self) -> &[u8] {
+    &self.internal_gba.wram_board[..]
+  }
+  pub fn palette_bytes(&self) -> &[u8] {
+    &self.internal_gba.palette_ram[..]
+  }
+  pub fn oam_bytes(&self) -> &[u8] {
+    &self.internal_gba.oam[..]
   }
   pub fn bios_bytes(&self) -> &[u8] {
     &self.internal_gba.bios_rom[..]
@@ -62,6 +71,7 @@ impl core::ops::Deref for GBABox {
     &*self.internal_gba
   }
 }
+
 impl core::ops::DerefMut for GBABox {
   fn deref_mut(&mut self) -> &mut Self::Target {
     &mut *self.internal_gba

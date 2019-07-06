@@ -77,8 +77,11 @@ pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error
           for y in 0usize..160usize {
             // Note: pitch values are provided **in bytes**, so cast to the pixel
             // type after you offset to the start of the target row.
-            let row_ptr = ptr.add(y * pitch) as *mut u32;
-            row_ptr.add(x).write(output[x * 160 + y]);
+            let row_ptr = ptr.add(y * pitch) as *mut u8;
+            let idx = x * 160 + y * 3;
+            row_ptr.add(idx).write(output[idx]);
+            row_ptr.add(idx + 1).write(output[idx + 1]);
+            row_ptr.add(idx + 2).write(output[idx + 2]);
           }
         }
       })?;

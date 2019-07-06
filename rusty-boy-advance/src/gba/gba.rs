@@ -23,9 +23,10 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 
 pub(crate) static mut COUNT: u32 = 0;
 
+#[derive(PartialEq)]
 pub enum LogLevel {
   None,
-  NormalizedEveryInstruction,
+  EveryInstruction,
   Debug,
 }
 #[derive(Debug)]
@@ -56,7 +57,7 @@ impl std::error::Error for GBAError {
 }
 pub struct GBA {
   //// Output image
-  pub(crate) output_texture: [u32; 240 * 160],
+  pub(crate) output_texture: [u8; 240 * 160 * 3],
   /// Current registers. Swapped on mode change acordingly.
   pub(crate) regs: [u32; 16],
   /// FIQ-only banked registers.
@@ -88,6 +89,7 @@ pub struct GBA {
   pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
   pub(crate) loaded_rom: Option<Rom>,
   pub(crate) print_fn: Option<fn(&str) -> ()>,
+  pub(crate) debug_print_fn: Option<fn(&str) -> ()>,
 }
 impl GBA {
   pub(crate) fn new(
@@ -95,20 +97,18 @@ impl GBA {
     bios_file: core::option::Option<&[u8]>,
     print_fn: Option<fn(&str) -> ()>,
   ) -> Box<Self> {
-    fn nothing(_: &mut GBA) {}
-    fn nothing_with_opcode(_: &mut GBA, _: u32) {}
-    fn print_opcode(gba: &mut GBA, opcode: u32) {
+    let nothing = |_: &mut GBA| {};
+    let nothing_with_str = |_: &str| {};
+    let nothing_with_opcode = |_: &mut GBA, _: u32| {};
+    let print_opcode = |gba: &mut GBA, opcode: u32| {
       gba.print_fn.map(|f| f(format!("opcode {}:{:x}\n", unsafe { COUNT }, opcode).as_str()));
-    }
-    fn print_state_normalized(gba: &mut GBA) {
-      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string_without_pc()).as_str()));
-    }
-    fn print_state(gba: &mut GBA) {
+    };
+    let print_state = |gba: &mut GBA| {
       gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
-    }
+    };
     // Was still getting stack overflows without Box X
     let mut gba = box GBA {
-      output_texture: [0xFF00_0000u32; 240 * 160],
+      output_texture: [0x00u8; 240 * 160 * 3],
       regs: [0u32; 16],
       fiq_only_banks: [[0u32; 5]; 2],
       all_modes_banks: [[0u32; 2]; 6],
@@ -126,18 +126,19 @@ impl GBA {
       clocks: 0u32,
       loaded_rom: None,
       instruction_hook: match log_level {
-        LogLevel::Debug => print_state,
-        LogLevel::NormalizedEveryInstruction => print_state_normalized,
+        LogLevel::Debug | LogLevel::EveryInstruction=> print_state,
         LogLevel::None => nothing,
       },
       instruction_hook_with_opcode: match log_level {
         LogLevel::Debug => print_opcode,
-        LogLevel::NormalizedEveryInstruction => print_opcode,
+        LogLevel::EveryInstruction => print_opcode,
         LogLevel::None => nothing_with_opcode,
       },
       print_fn: print_fn,
+      debug_print_fn: if log_level == LogLevel::Debug {print_fn} else {None},
     };
     gba.reset();
+    //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     gba.bios_rom.clone_from_slice(bios_file);
     gba
@@ -206,18 +207,24 @@ impl GBA {
       //WRAM - On-board Work RAM  (256 KBytes) 2 Wait
       0x0200_0000..=0x0203_FFFF => self.wram_board[addr - 0x0200_0000],
       //WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
+      0x0300_0000..=0x03FF_FFFF => self.wram_chip[addr & 0x0000_7FFF],
+      /*
       0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
       0x0300_8000..=0x03FF_FFFF => self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF],
+      */
       //I/O Registers             (1022 Bytes)
       0x0400_0000..=0x0400_03FD => self.io_mem[addr - 0x0400_0000], //TODO:IO
       0x0400_03FE..=0x04FF_FFFF => {
-        self.print_fn.map(|f| f(format!("Bad io read at {:x}", addr).as_str()));
+        self.debug_print_fn.map(|f| f(format!("Bad I/O read at {:x}", addr).as_str()));
         0
       }
       //Internal Display Memory
-      0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000], /* BG/OBJ Palette RAM        (1 Kbyte) */
-      0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000], /* VRAM - Video RAM          (96 KBytes) */
-      0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
+      /* BG/OBJ Palette RAM        (1 Kbyte) */
+      0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000], 
+      /* VRAM - Video RAM          (96 KBytes) */
+      0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000], 
+      /* OAM - OBJ Attributes      (1 Kbyte) */
+      0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], 
       //External Memory (Game Pak)
       // TODO: Wait states
       /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
@@ -327,9 +334,10 @@ impl GBA {
     }
   }
   pub fn reset(&mut self) {
+    unsafe{COUNT = 0};
     self.regs = [0; 16];
     *self.pc() = RESET_HANDLER;
-    self.output_texture = [0xFF00_0000u32; 240 * 160];
+    self.output_texture = [0x00u8; 240 * 160 * 3];
     self.fiq_only_banks = [[0u32; 5]; 2];
     self.all_modes_banks = [[0u32; 2]; 6];
     self.io_mem = [0u8; 1022];
@@ -342,6 +350,9 @@ impl GBA {
     self.wram_board = [0u8; 256 * KB];
     self.wram_chip = [0u8; 32 * KB];
     self.palette_ram = [0u8; KB];
+    for (idx, x) in self.palette_ram.iter_mut().enumerate() {
+      *x = (idx*50) as u8;
+    }
     self.vram = [0u8; 96 * KB];
     self.oam = [0u8; KB];
     self.game_pak = box [0u8; 32 * MB];
@@ -368,23 +379,6 @@ impl GBA {
   pub(crate) fn thumb(&mut self) -> bool {
     self.cpsr.thumb_state_flag()
   }
-  pub fn state_as_string_without_pc(&mut self) -> String {
-    format!(
-      "{}\n{}",
-      self
-        .regs
-        .iter()
-        .enumerate()
-        //.take(15)
-        .map(|(idx, val)| format!("r{}:{:x}", idx, if idx ==15 {
-          val+
-          if self.cpsr.thumb_state_flag() {2} else {4}
-          } else {*val}))
-        .collect::<Vec<_>>()
-        .join(" "),
-      self.cpsr
-    )
-  }
   pub fn state_as_string(&mut self) -> String {
     format!(
       "{}\n{}",
@@ -392,7 +386,10 @@ impl GBA {
         .regs
         .iter()
         .enumerate()
-        .map(|(idx, val)| format!("r{}:{:x}", idx, val))
+        .map(|(idx, val)| format!("r{}:{:x}", idx, if idx ==15 {
+          val+
+          if self.cpsr.thumb_state_flag() {2} else {4}
+          } else {*val}))
         .collect::<Vec<_>>()
         .join(" "),
       self.cpsr
@@ -414,6 +411,27 @@ impl GBA {
     // TODO: However this is meant to be done
     for _ in 0..1000 {
       self.run_one_instruction()?;
+    }
+    match self.io_mem[0] & 0x0000_0007{
+      0 => (),
+      1 => (),
+      2 => (),
+      3 => (),
+      4 =>  {
+        let second_frame = (self.io_mem[0] & 0x0000_0008 ) != 0;
+        for (idx,palette_idx) in self.vram.iter().skip(if second_frame{240*160} else {0}).take(240*160).enumerate() {
+          let palette_idx = (*palette_idx as usize)*2;
+          let color = (self.palette_ram[palette_idx] as u16) + ((self.palette_ram[palette_idx+1] as u16)<< 8);
+          let r = ((color & 0x001F) >> 0) as u8;
+          let g = ((color & 0x03E0) >> 5) as u8;
+          let b = ((color & 0xFC00) >> 10) as u8;
+          self.output_texture[(idx*3) + 0] = (std::cmp::max(r, 14)-14).overflowing_mul(15).0;
+          self.output_texture[(idx*3) + 1] = (std::cmp::max(g, 14)-14).overflowing_mul(15).0;
+          self.output_texture[(idx*3) + 2] = (std::cmp::max(b, 14)-14).overflowing_mul(15).0;
+        }
+      },
+      5 => (),
+      _ => ()
     }
     Ok(())
   }

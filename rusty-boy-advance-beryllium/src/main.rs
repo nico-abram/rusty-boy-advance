@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut gba = {
     let log_level = match log_level {
       0 => LogLevel::None,
-      1 => LogLevel::NormalizedEveryInstruction,
+      1 => LogLevel::EveryInstruction,
       2 => LogLevel::Debug,
       _ => unimplemented!(), // Clap ensures this doesnt happen
     };
