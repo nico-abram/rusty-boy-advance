@@ -29,10 +29,10 @@ pub fn init(title: &str) -> System {
     ICON_GLYPH_RANGE[256] = 0;
   }
   let events_loop = glutin::EventsLoop::new();
-  let context = glutin::ContextBuilder::new().with_vsync(true);
+  let context = glutin::ContextBuilder::new().with_vsync(false);
   let builder = glutin::WindowBuilder::new()
     .with_title(title.to_owned())
-    .with_dimensions(glutin::dpi::LogicalSize::new(1024f64, 768f64));
+    .with_dimensions(glutin::dpi::LogicalSize::new(1024f64, 600f64));
   let display = Display::new(builder, context, &events_loop).expect("Failed to initialize display");
 
   let mut imgui = Context::create();
@@ -70,7 +70,7 @@ pub fn init(title: &str) -> System {
 }
 
 impl System {
-  pub fn main_loop<F: FnMut(&mut bool, &mut Ui, &mut GliumRenderer, &glium::Display)>(
+  pub fn main_loop<F: FnMut(&mut bool, &mut Ui, &mut GliumRenderer, &glium::Display, f32)>(
     self,
     mut run_ui: F,
   ) {
@@ -94,11 +94,12 @@ impl System {
       let io = imgui.io_mut();
       platform.prepare_frame(io, &window).expect("Failed to start frame");
       last_frame = io.update_delta_time(last_frame);
+      let fps = io.framerate;
       let mut ui = imgui.frame();
-      run_ui(&mut run, &mut ui, &mut renderer, &display);
+      run_ui(&mut run, &mut ui, &mut renderer, &display, fps);
 
       let mut target = display.draw();
-      target.clear_color_srgb(1.0, 1.0, 1.0, 1.0);
+      target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
       platform.prepare_render(&ui, &window);
       let draw_data = ui.render();
       renderer.render(&mut target, draw_data).expect("Rendering failed");
