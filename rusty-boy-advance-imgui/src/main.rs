@@ -95,28 +95,30 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       }
       just_clicked_continue = false;
     }
-    if let Some(rom_name) = gba.loaded_rom().map(|rom| rom.title()) {
-      ui.window(unsafe {
-        imgui::ImStr::from_utf8_with_nul_unchecked(format!("{}\0", rom_name).as_str().as_bytes())
-      })
-      .position([400.0, 0.0], Condition::Appearing)
-      .always_auto_resize(true)
-      .build(|| {
-        let texture = renderer.textures().get(video_output_texture_id).unwrap();
-        let raw = RawImage2d {
-          data: Cow::Owned(gba.video_output().into()),
-          width: WIDTH as u32,
-          height: HEIGHT as u32,
-          format: ClientFormat::U8U8U8U8,
-        };
-        texture.write(glium::Rect { left: 0, bottom: 0, width: WIDTH, height: HEIGHT }, raw);
-        ui.image(video_output_texture_id, [WIDTH as f32, HEIGHT as f32]).build();
-      });
-    }
+    ui.window(unsafe {
+      imgui::ImStr::from_utf8_with_nul_unchecked(
+        format!("{}\0", gba.loaded_rom().map(|rom| rom.title()).unwrap_or("No ROM loaded"))
+          .as_str()
+          .as_bytes(),
+      )
+    })
+    .position([210.0, 90.0], Condition::Appearing)
+    .always_auto_resize(true)
+    .build(|| {
+      let texture = renderer.textures().get(video_output_texture_id).unwrap();
+      let raw = RawImage2d {
+        data: Cow::Owned(gba.video_output().into()),
+        width: WIDTH as u32,
+        height: HEIGHT as u32,
+        format: ClientFormat::U8U8U8U8,
+      };
+      texture.write(glium::Rect { left: 0, bottom: 0, width: WIDTH, height: HEIGHT }, raw);
+      ui.image(video_output_texture_id, [WIDTH as f32, HEIGHT as f32]).build();
+    });
     ui.window(im_str!("CPU State"))
-      .size([200.0, 305.0], Condition::Appearing)
+      .size([210.0, 305.0], Condition::Appearing)
       .resizable(false)
-      .position([125.0, 0.0], Condition::Appearing)
+      .position([0.0, 0.0], Condition::Appearing)
       .build(|| {
         ui.columns(2, im_str!("a"), true);
         let cpsr = gba.cpsr();
@@ -133,12 +135,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ));
         ui.set_column_offset(1, 80.0);
         ui.next_column();
-        for (num, val) in gba.registers().iter().enumerate() {
-          ui.text(format!("r{:<2}:{:08x}", num, *val));
+        const register_names: [&str; 16] = [
+          "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
+          "pc",
+        ];
+        for (idx, (value, name)) in gba.registers().iter().zip(register_names.iter()).enumerate() {
+          ui.text(format!("{} r{:<2}:{:08x}", name, idx, *value));
         }
       });
     ui.window(im_str!("Debug Buttons"))
-      .position([0.0, 0.0], Condition::Appearing)
+      .position([210.0, 285.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
         let stop_continue_icon = if running { im_str!(" ") } else { im_str!(" ") };
@@ -165,8 +171,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
       });
     ui.window(im_str!("ROM Loading"))
-      .position([0.0, 350.0], Condition::Appearing)
-      .always_auto_resize(true)
+      .position([210.0, 0.0], Condition::Appearing)
+      .size([260.0, 90.0], Condition::Appearing)
       .build(|| {
         if ui.small_button(im_str!("Browse")) {
           match nfd::open_file_dialog(None, None).unwrap_or(nfd::Response::Cancel) {
@@ -175,6 +181,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             nfd::Response::Cancel => (), // ignore
           }
         }
+        ui.text("File: ");
+        ui.same_line(0.0);
         ui.input_text(im_str!(" "), &mut current_rom_file).build();
         if ui.small_button(im_str!("Load and Reset")) {
           let rom_file =
@@ -199,7 +207,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
       });
     ui.window(im_str!("Memory Viewer"))
-      .position([0.0, 350.0], Condition::Appearing)
+      .position([465.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
         if ui.radio_button(im_str!("BIOS"), &mut browsed_memory.mem, BrowsableMemory::BIOS) {
