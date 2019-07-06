@@ -35,9 +35,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut gba = GBABox::new(LogLevel::None, None, Some(|x| print!("{}", x)));
   let mut r = Asset::new(quicksilver::load_file("e.gba"));
   r.execute(|rom_file| {
-    gba.load(&rom_file[..]).unwrap();
-    Ok(())
-  });
+    gba
+      .load(&rom_file[..])
+      .map_err(|_| quicksilver::Error::ContextError(String::from("Error loading ROM")))
+  })?;
   quicksilver::lifecycle::run_with(
     "Rusty Boy Advance Quicksilver",
     Vector::new(240, 160),

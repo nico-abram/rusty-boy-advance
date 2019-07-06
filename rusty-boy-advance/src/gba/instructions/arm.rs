@@ -269,10 +269,17 @@ fn halfword_data_transfer_immediate_offset(gba: &mut GBA, opcode: u32) -> ARMRes
 fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
+  gba.print_fn.map(|f| f(format!("pre offseted:{}\n", is_pre_offseted).as_str()));
+  gba.print_fn.map(|f| f(format!("is_up:{}\n", is_up).as_str()));
+  gba.print_fn.map(|f| f(format!("is_byte_size:{}\n", is_byte_size).as_str()));
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
+  gba.print_fn.map(|f| f(format!("rn:{}\n", rn).as_str()));
+  gba.print_fn.map(|f| f(format!("rd:{}\n", rd).as_str()));
   let offset = if !shifted_register {
+    gba.print_fn.map(|f| f(format!("immediate:{}\n", opcode & 0x0000_0FFF).as_str()));
     opcode & 0x0000_0FFF
   } else {
+    gba.print_fn.map(|f| f(format!("shifted regiter\n").as_str()));
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = second_byte;
     let register_value = gba.regs[first_byte];
@@ -291,6 +298,7 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   };
   let mut addr =
     (i64::from(gba.regs[rn]) + if is_up { i64::from(offset) } else { -i64::from(offset) }) as u32;
+  gba.print_fn.map(|f| f(format!("addr:{:x}\n", addr).as_str()));
   if rn == 15 {
     addr += 4;
   }

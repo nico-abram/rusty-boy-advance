@@ -12,12 +12,15 @@ mod support;
 #[derive(Copy, Clone, PartialEq)]
 enum BrowsableMemory {
   BIOS,
+  ChipWRAM,
   ROM,
   VRAM,
 }
 fn offset(mem: BrowsableMemory) -> u32 {
   match mem {
     BrowsableMemory::BIOS => 0,
+    BrowsableMemory::ChipWRAM => 0x0300_0000,
+    BrowsableMemory::BoardWRAM => 0x0300_0000,
     BrowsableMemory::ROM => 0x0800_0000,
     BrowsableMemory::VRAM => 0x0600_0000,
   }
@@ -25,6 +28,7 @@ fn offset(mem: BrowsableMemory) -> u32 {
 fn get_memory(gba: &GBABox, mem: BrowsableMemory) -> &[u8] {
   match mem {
     BrowsableMemory::BIOS => gba.bios_bytes(),
+    BrowsableMemory::ChipWRAM => gba.chip_wram_bytes(),
     BrowsableMemory::ROM => gba.loaded_rom().unwrap().game_pak(),
     BrowsableMemory::VRAM => gba.vram(),
   }
@@ -77,7 +81,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   };
 
   update_currently_browsed_memory_string(&gba, &mut browsed_memory);
-  system.main_loop(|opened, ui, renderer, _display| {
+  system.main_loop(|_opened, ui, renderer, _display| {
     if running {
       if browsed_memory.breakpoints.len() == 0 {
         gba.run_one_frame().unwrap();
@@ -90,7 +94,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             break;
           }
           just_clicked_continue = false;
-          gba.run_one_instruction();
+          gba.run_one_instruction().unwrap();
         }
       }
       just_clicked_continue = false;
@@ -135,11 +139,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ));
         ui.set_column_offset(1, 80.0);
         ui.next_column();
-        const register_names: [&str; 16] = [
+        const REGISTER_NAMES: [&str; 16] = [
           "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
           "pc",
         ];
-        for (idx, (value, name)) in gba.registers().iter().zip(register_names.iter()).enumerate() {
+        for (idx, (value, name)) in gba.registers().iter().zip(REGISTER_NAMES.iter()).enumerate() {
           ui.text(format!("{} r{:<2}:{:08x}", name, idx, *value));
         }
       });
@@ -177,7 +181,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.small_button(im_str!("Browse")) {
           match nfd::open_file_dialog(None, None).unwrap_or(nfd::Response::Cancel) {
             nfd::Response::Okay(file_path) => current_rom_file = ImString::new(file_path),
-            nfd::Response::OkayMultiple(files) => std::panic!("This should never happen"),
+            nfd::Response::OkayMultiple(_) => std::panic!("This should never happen"),
             nfd::Response::Cancel => (), // ignore
           }
         }
@@ -211,6 +215,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       .always_auto_resize(true)
       .build(|| {
         if ui.radio_button(im_str!("BIOS"), &mut browsed_memory.mem, BrowsableMemory::BIOS) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+        }
+        if ui.radio_button(im_str!("chip-WRAM"), &mut browsed_memory.mem, BrowsableMemory::ChipWRAM)
+        {
           update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
         ui.same_line(0.0);

@@ -87,7 +87,7 @@ pub struct GBA {
   instruction_hook: fn(&mut GBA),
   pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
   pub(crate) loaded_rom: Option<Rom>,
-  print_fn: Option<fn(&str) -> ()>,
+  pub(crate) print_fn: Option<fn(&str) -> ()>,
 }
 impl GBA {
   pub(crate) fn new(
@@ -220,24 +220,26 @@ impl GBA {
       0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
       //External Memory (Game Pak)
       // TODO: Wait states
+      /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
       0x0800_0000..=0x09FF_FFFF => {
-        self.print_fn.map(|f| {
-          f(format!("reading rom 1 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
-        });
-        self.game_pak[addr & 0x01FF_FFFF]
-      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
+        let addr = addr - 0x0800_0000;
+        if addr <= 0x00FF_FFFF {
+          self.game_pak[addr]
+        } else {
+          // Out of bounds ROM access (Behaviour taken from MGBA)
+          ((addr >> 1) & 0x0000_00FF) as u8
+        }
+      }
+      /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
       0x0A00_0000..=0x0BFF_FFFF => {
-        self.print_fn.map(|f| {
-          f(format!("reading rom 2 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
-        });
-        self.game_pak[addr & 0x01FF_FFFF]
-      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
+        let addr = addr - 0x0A00_0000;
+        if addr <= 0x00FF_FFFF { self.game_pak[addr] } else { ((addr >> 1) & 0x0000_00FF) as u8 }
+      }
+      /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
       0x0C00_0000..=0x0DFF_FFFF => {
-        self.print_fn.map(|f| {
-          f(format!("reading rom 3 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
-        });
-        self.game_pak[addr & 0x01FF_FFFF]
-      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
+        let addr = addr - 0x0C00_0000;
+        if addr <= 0x00FF_FFFF { self.game_pak[addr] } else { ((addr >> 1) & 0x0000_00FF) as u8 }
+      }
       0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr & 0x01FF_FFFF], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
       //_ => unimplemented!("Invalid address: {:x}", addr),
       _ => 0u8,
@@ -265,7 +267,7 @@ impl GBA {
         self.io_mem[addr - 0x0400_0000] = byte;
       }
       0x0400_0400..=0x04FF_FFFF => {
-        let addr = addr & 0xFFFF;
+        let _addr = addr & 0xFFFF;
         self.io_mem[0] = byte;
       }
       //Internal Display Memory
@@ -284,15 +286,12 @@ impl GBA {
       //External Memory (Game Pak)
       // TODO: Wait states
       0x0800_0000..=0x09FF_FFFF => {
-        self.print_fn.map(|f| f(format!("writing rom 1 {:x}:{:x}", addr, byte).as_str()));
         self.game_pak[addr - 0x0800_0000] = byte;
       } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
       0x0A00_0000..=0x0BFF_FFFF => {
-        self.print_fn.map(|f| f(format!("writing rom 2 {:x}:{:x}", addr, byte).as_str()));
         self.game_pak[addr & 0x01FF_FFFF] = byte;
       } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
       0x0C00_0000..=0x0DFF_FFFF => {
-        self.print_fn.map(|f| f(format!("writing rom 3 {:x}:{:x}", addr, byte).as_str()));
         self.game_pak[addr & 0x01FF_FFFF] = byte;
       } /* Game Pak ROM/FlashROM (mx 32MB) - Wait State 2 */
       0x0E00_0000..=0x0E00_FFFF => {
@@ -310,10 +309,22 @@ impl GBA {
     self.write_u16(addr + 2, (value >> 16) as u16);
   }
   pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
-    u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8)
+    match addr {
+      // ROM out of bounds access (Behaviour taken from MGBA)
+      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
+      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
+      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
+      _ => u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8),
+    }
   }
   pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
-    u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16)
+    match addr {
+      // ROM out of bounds access (Behaviour taken from MGBA)
+      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      _ => u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16),
+    }
   }
   pub fn reset(&mut self) {
     self.regs = [0; 16];
@@ -364,8 +375,11 @@ impl GBA {
         .regs
         .iter()
         .enumerate()
-        .take(15)
-        .map(|(idx, val)| format!("r{}:{:x}", idx, val))
+        //.take(15)
+        .map(|(idx, val)| format!("r{}:{:x}", idx, if idx ==15 {
+          val+
+          if self.cpsr.thumb_state_flag() {2} else {4}
+          } else {*val}))
         .collect::<Vec<_>>()
         .join(" "),
       self.cpsr

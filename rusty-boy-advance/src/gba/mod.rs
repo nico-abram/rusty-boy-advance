@@ -40,6 +40,9 @@ impl GBABox {
   pub fn cpsr(&self) -> CPSR {
     self.cpsr
   }
+  pub fn chip_wram_bytes(&self) -> &[u8] {
+    &self.internal_gba.wram_chip[..]
+  }
   pub fn bios_bytes(&self) -> &[u8] {
     &self.internal_gba.bios_rom[..]
   }

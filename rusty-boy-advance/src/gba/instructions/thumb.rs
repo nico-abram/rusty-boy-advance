@@ -121,7 +121,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let rd_val = gba.regs[rd];
   if operation == 1 {
     // CMP handled separately since it doesnt store the result
-    let (res, overflow) = rd_val.overflowing_sub(offset);
+    let (res, _overflow) = rd_val.overflowing_sub(offset);
     gba.cpsr.set_all_status_flags(
       res,
       Some(offset <= rd_val),
@@ -386,6 +386,7 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
     if sign_extend {
       (i32::from(gba.fetch_u16(addr) as i16) as u32) // Sign extend
     } else {
+      // zero extend
       u32::from(gba.fetch_u16(addr))
     }
   } else {
@@ -458,8 +459,7 @@ fn load_address(gba: &mut GBA, opcode: u16) -> ThumbResult {
   gba.regs[rd] = if load_sp_else_pc {
     gba.regs[13].overflowing_add(nn).0
   } else {
-    //TODO: Is this right????
-    ((gba.regs[15].overflowing_add(4).0) & !2).overflowing_add(nn).0
+    (gba.regs[15].overflowing_add(2).0 & !3).overflowing_add(nn).0
   };
   gba.clocks += 0; // TODO: clocks
   Ok(())
