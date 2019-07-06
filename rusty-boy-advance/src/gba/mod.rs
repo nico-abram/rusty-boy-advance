@@ -7,7 +7,7 @@ mod utils;
 
 pub use cpsr::CPSR;
 pub use cpu_mode::CpuMode;
-pub use gba::{LogLevel, GBA, GBAError};
+pub use gba::{GBAError, LogLevel, GBA};
 pub use rom::Rom;
 
 use alloc::boxed::Box;
@@ -27,6 +27,9 @@ impl GBABox {
   }
   pub fn video_output(&self) -> &[u32] {
     &self.internal_gba.output_texture[..]
+  }
+  pub fn vram(&self) -> &[u8] {
+    &self.vram[..]
   }
   pub fn loaded_rom(&self) -> Option<&Rom> {
     self.internal_gba.loaded_rom.as_ref()

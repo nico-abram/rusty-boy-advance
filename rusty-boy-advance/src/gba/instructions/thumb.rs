@@ -122,8 +122,11 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
   if operation == 1 {
     // CMP handled separately since it doesnt store the result
     let (res, overflow) = rd_val.overflowing_sub(offset);
-    gba.cpsr.set_all_status_flags(res, Some(offset <= rd_val),
-        Some(((rd_val ^ offset) as i32) < 0 && ((offset ^ res) as i32) >= 0),);
+    gba.cpsr.set_all_status_flags(
+      res,
+      Some(offset <= rd_val),
+      Some(((rd_val ^ offset) as i32) < 0 && ((offset ^ res) as i32) >= 0),
+    );
     gba.clocks += 0; // TODO: clocks
     return Ok(());
   }

@@ -2,7 +2,7 @@ use glium::{
   glutin::{self, Event, WindowEvent},
   Display, Surface,
 };
-use imgui::{Context, FontConfig, FontSource, Ui};
+use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::GliumRenderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
@@ -16,7 +16,18 @@ pub struct System {
   pub font_size: f32,
 }
 
+// We can't make a const range array atm. Maybe make this less hideous
+// With something like a lazy static, but it's probably not worth it
+// as this works and is just a temporary hack until we can define it as const
+static mut ICON_GLYPH_RANGE: [u16; 257] = [0u16; 257];
+
 pub fn init(title: &str) -> System {
+  unsafe {
+    for (idx, x) in ICON_GLYPH_RANGE.iter_mut().enumerate() {
+      *x = (idx + 0xe000) as u16;
+    }
+    ICON_GLYPH_RANGE[256] = 0;
+  }
   let title = match title.rfind('/') {
     Some(idx) => title.split_at(idx + 1).1,
     None => title,
@@ -40,9 +51,20 @@ pub fn init(title: &str) -> System {
 
   let hidpi_factor = platform.hidpi_factor();
   let font_size = (13.0 * hidpi_factor) as f32;
-  imgui.fonts().add_font(&[FontSource::DefaultFontData {
-    config: Some(FontConfig { size_pixels: font_size, ..FontConfig::default() }),
-  }]);
+  imgui.fonts().add_font(&[
+    FontSource::DefaultFontData {
+      config: Some(FontConfig { size_pixels: font_size, ..FontConfig::default() }),
+    },
+    FontSource::TtfData {
+      data: include_bytes!("../resources/OpenFontIcons.ttf"),
+      size_pixels: font_size,
+      config: Some(FontConfig {
+        rasterizer_multiply: 1.75,
+        glyph_ranges: FontGlyphRanges::from_slice(unsafe { &ICON_GLYPH_RANGE }),
+        ..FontConfig::default()
+      }),
+    },
+  ]);
 
   imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
 

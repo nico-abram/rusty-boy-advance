@@ -1,4 +1,4 @@
-use rusty_boy_advance::{LogLevel, GBABox};
+use rusty_boy_advance::{GBABox, LogLevel};
 
 use quicksilver::{
   geom::Vector,

@@ -209,8 +209,8 @@ impl GBA {
       0x0300_0000..=0x0300_7FFF => self.wram_chip[addr - 0x0300_0000],
       0x0300_8000..=0x03FF_FFFF => self.wram_chip[(addr - 0x0300_8000) % 0x0000_7FFF],
       //I/O Registers             (1022 Bytes)
-      0x0400_0000..=0x0400_03FE => self.io_mem[addr - 0x0400_0000], //TODO:IO
-      0x0400_4000..=0x04FF_FFFF => {
+      0x0400_0000..=0x0400_03FD => self.io_mem[addr - 0x0400_0000], //TODO:IO
+      0x0400_03FE..=0x04FF_FFFF => {
         self.print_fn.map(|f| f(format!("Bad io read at {:x}", addr).as_str()));
         0
       }
@@ -220,11 +220,25 @@ impl GBA {
       0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000], /* OAM - OBJ Attributes      (1 Kbyte) */
       //External Memory (Game Pak)
       // TODO: Wait states
-      //0x0200 0000
-      0x0800_0000..=0x09FF_FFFF => self.game_pak[addr - 0x0800_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
-      0x0A00_0000..=0x0BFF_FFFF => self.game_pak[addr - 0x0A00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
-      0x0C00_0000..=0x0DFF_FFFF => self.game_pak[addr - 0x0C00_0000], /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
-      0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr - 0x0E00_0000], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
+      0x0800_0000..=0x09FF_FFFF => {
+        self.print_fn.map(|f| {
+          f(format!("reading rom 1 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
+        });
+        self.game_pak[addr & 0x01FF_FFFF]
+      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
+      0x0A00_0000..=0x0BFF_FFFF => {
+        self.print_fn.map(|f| {
+          f(format!("reading rom 2 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
+        });
+        self.game_pak[addr & 0x01FF_FFFF]
+      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
+      0x0C00_0000..=0x0DFF_FFFF => {
+        self.print_fn.map(|f| {
+          f(format!("reading rom 3 {:x}:{:x}\n", addr, self.game_pak[addr & 0x01FF_FFFF]).as_str())
+        });
+        self.game_pak[addr & 0x01FF_FFFF]
+      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
+      0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr & 0x01FF_FFFF], /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
       //_ => unimplemented!("Invalid address: {:x}", addr),
       _ => 0u8,
     }
@@ -255,28 +269,34 @@ impl GBA {
         self.io_mem[0] = byte;
       }
       //Internal Display Memory
+      /* BG/OBJ Palette RAM        (1 Kbyte) */
       0x0500_0000..=0x0500_03FF => {
         self.palette_ram[addr - 0x0500_0000] = byte;
-      } /* BG/OBJ Palette RAM        (1 Kbyte) */
+      }
+      /* VRAM - Video RAM          (96 KBytes) */
       0x0600_0000..=0x0601_7FFF => {
         self.vram[addr - 0x0600_0000] = byte;
-      } /* VRAM - Video RAM          (96 KBytes) */
+      }
+      /* OAM - OBJ Attributes      (1 Kbyte) */
       0x0700_0000..=0x0700_03FF => {
         self.oam[addr - 0x0700_0000] = byte;
-      } /* OAM - OBJ Attributes      (1 Kbyte) */
+      }
       //External Memory (Game Pak)
       // TODO: Wait states
       0x0800_0000..=0x09FF_FFFF => {
+        self.print_fn.map(|f| f(format!("writing rom 1 {:x}:{:x}", addr, byte).as_str()));
         self.game_pak[addr - 0x0800_0000] = byte;
       } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 0 */
       0x0A00_0000..=0x0BFF_FFFF => {
-        self.game_pak[addr - 0x0A00_0000] = byte;
+        self.print_fn.map(|f| f(format!("writing rom 2 {:x}:{:x}", addr, byte).as_str()));
+        self.game_pak[addr & 0x01FF_FFFF] = byte;
       } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 1 */
       0x0C00_0000..=0x0DFF_FFFF => {
-        self.game_pak[addr - 0x0C00_0000] = byte;
-      } /* Game Pak ROM/FlashROM (max 32MB) - Wait State 2 */
+        self.print_fn.map(|f| f(format!("writing rom 3 {:x}:{:x}", addr, byte).as_str()));
+        self.game_pak[addr & 0x01FF_FFFF] = byte;
+      } /* Game Pak ROM/FlashROM (mx 32MB) - Wait State 2 */
       0x0E00_0000..=0x0E00_FFFF => {
-        self.game_pak[addr - 0x0E00_0000] = byte;
+        self.game_pak[addr & 0x01FF_FFFF] = byte;
       } /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
       _ => unimplemented!("Invalid address: {:x}", addr),
     }
@@ -378,7 +398,7 @@ impl GBA {
   }
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
     // TODO: However this is meant to be done
-    for _ in 0..100 {
+    for _ in 0..1000 {
       self.run_one_instruction()?;
     }
     Ok(())

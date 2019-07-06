@@ -20,3 +20,4 @@ imgui = { version = "0.1.0-pre"}
 imgui-glium-renderer = { version = "0.1.0-pre"}
 imgui-winit-support = { version = "0.1.0-pre" }
 image = "0.21"
+nfd = "0.0.4"

@@ -4,10 +4,50 @@ use glium::{
   Texture2d,
 };
 use imgui::{im_str, Condition, ImString};
-use rusty_boy_advance::{LogLevel, GBABox};
+use rusty_boy_advance::{GBABox, LogLevel};
 use std::{borrow::Cow, io::Read};
 
 mod support;
+
+#[derive(Copy, Clone, PartialEq)]
+enum BrowsableMemory {
+  BIOS,
+  ROM,
+  VRAM,
+}
+fn offset(mem: BrowsableMemory) -> u32 {
+  match mem {
+    BrowsableMemory::BIOS => 0,
+    BrowsableMemory::ROM => 0x0800_0000,
+    BrowsableMemory::VRAM => 0x0600_0000,
+  }
+}
+fn get_memory(gba: &GBABox, mem: BrowsableMemory) -> &[u8] {
+  match mem {
+    BrowsableMemory::BIOS => gba.bios_bytes(),
+    BrowsableMemory::ROM => gba.loaded_rom().unwrap().game_pak(),
+    BrowsableMemory::VRAM => gba.vram(),
+  }
+}
+struct BrowsedMemory {
+  mem: BrowsableMemory,
+  chunk_size: usize,
+  auto_update: bool,
+  contents: Vec<(ImString, String, u32, bool)>,
+  breakpoints: Vec<u32>,
+}
+fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory) {
+  mem.contents.clear();
+  for (chunk_idx, chunks) in get_memory(gba, mem.mem).chunks(mem.chunk_size).enumerate() {
+    let addr = ((chunk_idx * mem.chunk_size) as u32) + offset(mem.mem);
+    mem.contents.push((
+      ImString::new(format!("{:08x}:", addr)),
+      chunks.iter().map(|x| format!("{:02x}", x)).collect::<Vec<_>>().join(""),
+      addr,
+      mem.breakpoints.iter().any(|x| *x == addr),
+    ));
+  }
+}
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   const WIDTH: u32 = 240;
@@ -23,14 +63,37 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
     Texture2d::new(system.display.get_context(), raw).unwrap()
   };
-  let texture_id = system.renderer.textures().insert(std::rc::Rc::new(gl_texture));
-  let mut running = true;
-  let mut current_browse_memory: fn(&GBABox) -> &[u8] = |gba| gba.bios_bytes();
-  let mut memory_browse_chunk_size = 4;
+  let video_output_texture_id = system.renderer.textures().insert(std::rc::Rc::new(gl_texture));
   let mut current_rom_file = ImString::with_capacity(128);
-  system.main_loop(|_, ui, renderer, _display| {
+  let mut running = false;
+  let mut just_clicked_continue = false;
+  let mut rom_open_msg = None;
+  let mut browsed_memory = BrowsedMemory {
+    mem: BrowsableMemory::BIOS,
+    chunk_size: 4,
+    auto_update: false,
+    contents: Vec::with_capacity(1024 * 1024 * 16),
+    breakpoints: Vec::new(),
+  };
+
+  update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+  system.main_loop(|opened, ui, renderer, _display| {
     if running {
-      gba.run_one_frame().unwrap();
+      if browsed_memory.breakpoints.len() == 0 {
+        gba.run_one_frame().unwrap();
+      } else {
+        for _ in 0..1000 {
+          if !just_clicked_continue
+            && browsed_memory.breakpoints.iter().any(|x| *x == gba.registers()[15])
+          {
+            running = false;
+            break;
+          }
+          just_clicked_continue = false;
+          gba.run_one_instruction();
+        }
+      }
+      just_clicked_continue = false;
     }
     if let Some(rom_name) = gba.loaded_rom().map(|rom| rom.title()) {
       ui.window(unsafe {
@@ -39,7 +102,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       .position([400.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
-        let texture = renderer.textures().get(texture_id).unwrap();
+        let texture = renderer.textures().get(video_output_texture_id).unwrap();
         let raw = RawImage2d {
           data: Cow::Owned(gba.video_output().into()),
           width: WIDTH as u32,
@@ -47,7 +110,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           format: ClientFormat::U8U8U8U8,
         };
         texture.write(glium::Rect { left: 0, bottom: 0, width: WIDTH, height: HEIGHT }, raw);
-        ui.image(texture_id, [WIDTH as f32, HEIGHT as f32]).build();
+        ui.image(video_output_texture_id, [WIDTH as f32, HEIGHT as f32]).build();
       });
     }
     ui.window(im_str!("CPU State"))
@@ -78,61 +141,115 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       .position([0.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
-        let stop_continue_label = if running { im_str!("Stop") } else { im_str!("Continue") };
-        if ui.button(stop_continue_label, [100.0, 50.0]) {
+        let stop_continue_icon = if running { im_str!(" ") } else { im_str!(" ") };
+        let icon_size = [30.0, 15.0];
+        if ui.button(stop_continue_icon, icon_size) {
           running = !running;
+          just_clicked_continue = true;
         }
+        ui.same_line(0.0);
+        ui.text(if running { im_str!("Stop") } else { im_str!("Continue") });
         if !running {
-          if ui.button(im_str!("Step"), [100.0, 50.0]) {
+          if ui.button(im_str!(" "), icon_size) {
             gba.run_one_instruction().unwrap();
           }
+          ui.same_line(0.0);
+          ui.text("Step");
+          if ui.button(im_str!(""), icon_size) {
+            for _ in 0..10 {
+              gba.run_one_instruction().unwrap();
+            }
+          }
+          ui.same_line(0.0);
+          ui.text("Step(10)");
         }
       });
     ui.window(im_str!("ROM Loading"))
       .position([0.0, 350.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
-        ui.input_text(im_str!("file"), &mut current_rom_file).build();
-        if ui.button(im_str!("Load and Reset"), [100.0, 50.0]) {
-          let rom_file =
-            unsafe { std::ffi::CStr::from_ptr(current_rom_file.as_ptr()) }.to_str().unwrap();
-          if let Ok(mut rom_file) = std::fs::File::open(rom_file) {
-            let mut contents = Vec::with_capacity(32 * 1024 * 1024);
-            rom_file.read_to_end(&mut contents);
-            gba.load(&contents[..]);
+        if ui.small_button(im_str!("Browse")) {
+          match nfd::open_file_dialog(None, None).unwrap_or(nfd::Response::Cancel) {
+            nfd::Response::Okay(file_path) => current_rom_file = ImString::new(file_path),
+            nfd::Response::OkayMultiple(files) => std::panic!("This should never happen"),
+            nfd::Response::Cancel => (), // ignore
           }
         }
+        ui.input_text(im_str!(" "), &mut current_rom_file).build();
+        if ui.small_button(im_str!("Load and Reset")) {
+          let rom_file =
+            unsafe { std::ffi::CStr::from_ptr(current_rom_file.as_ptr()) }.to_str().unwrap();
+          let success = if let Ok(mut rom_file) = std::fs::File::open(rom_file) {
+            let mut contents = Vec::with_capacity(32 * 1024 * 1024);
+            rom_file
+              .read_to_end(&mut contents)
+              .map(|_| gba.load(&contents[..]).is_ok())
+              .unwrap_or(false)
+          } else {
+            false
+          };
+          if !success {
+            rom_open_msg = Some("Error loading rom file");
+          } else {
+            rom_open_msg = None;
+          }
+        }
+        if let Some(msg) = rom_open_msg {
+          ui.text(msg);
+        }
       });
-    ui.window(im_str!("Memory"))
+    ui.window(im_str!("Memory Viewer"))
       .position([0.0, 350.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
-        if ui.button(im_str!("BIOS"), [100.0, 50.0]) {
-          current_browse_memory = |gba| gba.bios_bytes();
+        if ui.radio_button(im_str!("BIOS"), &mut browsed_memory.mem, BrowsableMemory::BIOS) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
         ui.same_line(0.0);
-        if ui.button(im_str!("ROM"), [100.0, 50.0]) {
-          current_browse_memory = |gba| gba.loaded_rom().unwrap().game_pak();
+        if ui.radio_button(im_str!("ROM"), &mut browsed_memory.mem, BrowsableMemory::ROM) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
         ui.same_line(0.0);
-        if ui.button(im_str!("VRAM"), [100.0, 50.0]) {
-          unimplemented!()
+        if ui.radio_button(im_str!("VRAM"), &mut browsed_memory.mem, BrowsableMemory::VRAM) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
+        if ui.small_button(im_str!("ARM style")) {
+          browsed_memory.chunk_size = 4;
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+        }
+        ui.same_line(0.0);
+        if ui.small_button(im_str!("THUMB style")) {
+          browsed_memory.chunk_size = 2;
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+        }
+        ui.checkbox(im_str!("Auto Update"), &mut browsed_memory.auto_update);
         ui.separator();
-        if ui.button(im_str!("ARM style"), [100.0, 50.0]) {
-          memory_browse_chunk_size = 4;
-        }
-        ui.same_line(0.0);
-        if ui.button(im_str!("THUMB style"), [100.0, 50.0]) {
-          memory_browse_chunk_size = 2;
-        }
-        ui.separator();
-        ui.child_frame(im_str!("child frame"), [400.0, 100.0])
+        ui.child_frame(im_str!("child frame"), [320.0, 400.0])
           .show_borders(true)
           .always_show_vertical_scroll_bar(true)
           .build(|| {
-            for chunks in current_browse_memory(&gba).chunks(memory_browse_chunk_size) {
-              ui.text(chunks.iter().map(|x| format!("{:x}", x)).collect::<Vec<_>>().join(""));
+            if browsed_memory.auto_update {
+              update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+            }
+            ui.columns(2, im_str!("memory contents"), true);
+            ui.set_column_offset(1, 150.0);
+            ui.text("Address");
+            ui.next_column();
+            ui.text("Value");
+            ui.next_column();
+            let (contents, breakpoints) =
+              (&mut browsed_memory.contents, &mut browsed_memory.breakpoints);
+            for (addr_string, value, addr_u32, checkpoint_set) in contents {
+              if ui.checkbox(addr_string, checkpoint_set) {
+                if *checkpoint_set {
+                  breakpoints.push(*addr_u32);
+                } else {
+                  breakpoints.retain(|x| *x != *addr_u32);
+                }
+              }
+              ui.next_column();
+              ui.text(value);
+              ui.next_column();
             }
           });
       });

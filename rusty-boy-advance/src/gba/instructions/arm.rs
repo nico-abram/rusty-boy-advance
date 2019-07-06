@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-use alloc::format;
-use alloc::string::String;
+use alloc::{format, string::String};
 
 use super::super::{
   cpsr::CPSR,

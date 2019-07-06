@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use rusty_boy_advance::{LogLevel, GBABox};
+use rusty_boy_advance::{GBABox, LogLevel};
 use std::io::Read;
 
 mod renderer;
@@ -87,13 +87,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bios_file = bios_file_name_option.map(|rom_filename| {
       std::fs::read(rom_filename).expect(format!("BIOS file {} not found", rom_filename).as_str())
     });
-    let mut gba = GBABox::new(log_level, bios_file.as_ref().map(|v| &v[..]), Some(|x| print!("{}", x)));
+    let mut gba =
+      GBABox::new(log_level, bios_file.as_ref().map(|v| &v[..]), Some(|x| print!("{}", x)));
     let mut rom_file = std::fs::File::open(rom_filename)
       .expect(format!("ROM file {} not found", rom_filename).as_str());
-     let mut rom_contents = Vec::with_capacity(32 * 1024 * 1024);
+    let mut rom_contents = Vec::with_capacity(32 * 1024 * 1024);
     rom_file.read_to_end(&mut rom_contents)?;
     gba.load(&rom_contents[..])?;
-    gba 
+    gba
   };
 
   if instructions_to_run > 0 {

@@ -733,6 +733,11 @@ version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "gcc"
+version = "0.3.55"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "generic-array"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1382,6 +1387,14 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "nfd"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "gcc 0.3.55 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "nix"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2021,6 +2034,7 @@ dependencies = [
  "imgui 0.1.0-rc.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "imgui-glium-renderer 0.1.0-rc.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "imgui-winit-support 0.1.0-rc.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nfd 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "rusty-boy-advance 0.0.4",
 ]
 
@@ -2842,6 +2856,7 @@ dependencies = [
 "checksum fuchsia-cprng 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
 "checksum futf 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "7c9c1ce3fa9336301af935ab852c437817d14cd33690446569392e65170aac3b"
 "checksum futures 0.1.28 (registry+https://github.com/rust-lang/crates.io-index)" = "45dc39533a6cae6da2b56da48edae506bb767ec07370f86f70fc062e9d435869"
+"checksum gcc 0.3.55 (registry+https://github.com/rust-lang/crates.io-index)" = "8f5f3913fa0bfe7ee1fd8248b6b9f42a5af4b9d65ec2dd2c3c26132b950ecfc2"
 "checksum generic-array 0.12.3 (registry+https://github.com/rust-lang/crates.io-index)" = "c68f0274ae0e023facc3c97b2e00f076be70e254bc851d972503b328db79b2ec"
 "checksum gif 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)" = "86c2f2b597d6e05c86ee5947b2223bda468fe8dad3e88e2a6520869322aaf568"
 "checksum gilrs 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b012698ad05fc2b88cdf38cd4bc1c94f7fea862ea26cef36aee03de877ef028b"
@@ -2914,6 +2929,7 @@ dependencies = [
 "checksum nalgebra 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)" = "8e12856109b5cb8e2934b5e45e4624839416e1c6c1f7d286711a7a66b79db29d"
 "checksum ncollide2d 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)" = "fd7791f03728b7fa45bd18af5adcb6f162a05e10853f273133547e9e12fa1910"
 "checksum new_debug_unreachable 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "f40f005c60db6e03bae699e414c58bf9aa7ea02a2d0b9bfbcf19286cc4c82b30"
+"checksum nfd 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "8e752e3c216bc8a491c5b59fa46da10f1379ae450b19ac688e07f4bb55042e98"
 "checksum nix 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)" = "becb657d662f1cd2ef38c7ad480ec6b8cf9e96b27adb543e594f9cf0f2e6065c"
 "checksum nix 0.14.1 (registry+https://github.com/rust-lang/crates.io-index)" = "6c722bee1037d430d0f8e687bbdbf222f27cc6e4e68d5caf630857bb2b6dbdce"
 "checksum nodrop 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "2f9667ddcc6cc8a43afc9b7917599d7216aa09c463919ea32c59ed6cac8bc945"
