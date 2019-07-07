@@ -21,8 +21,6 @@ const ADDRESS_TOO_BIG_HANDLER: u32 = 0x0000_0014;
 const NORMAL_INTERRUPT_HANDLER: u32 = 0x0000_0018;
 const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 
-pub(crate) static mut COUNT: u32 = 0;
-
 #[derive(PartialEq)]
 pub enum LogLevel {
   None,
@@ -90,6 +88,7 @@ pub struct GBA {
   pub(crate) loaded_rom: Option<Rom>,
   pub(crate) print_fn: Option<fn(&str) -> ()>,
   pub(crate) debug_print_fn: Option<fn(&str) -> ()>,
+  pub(crate) executed_instructions_count:u64
 }
 impl GBA {
   pub(crate) fn new(
@@ -101,7 +100,7 @@ impl GBA {
     let nothing_with_str = |_: &str| {};
     let nothing_with_opcode = |_: &mut GBA, _: u32| {};
     let print_opcode = |gba: &mut GBA, opcode: u32| {
-      gba.print_fn.map(|f| f(format!("opcode {}:{:x}\n", unsafe { COUNT }, opcode).as_str()));
+      gba.print_fn.map(|f| f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str()));
     };
     let print_state = |gba: &mut GBA| {
       gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
@@ -136,6 +135,7 @@ impl GBA {
       },
       print_fn: print_fn,
       debug_print_fn: if log_level == LogLevel::Debug {print_fn} else {None},
+      executed_instructions_count:0,
     };
     gba.reset();
     //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
@@ -334,7 +334,7 @@ impl GBA {
     }
   }
   pub fn reset(&mut self) {
-    unsafe{COUNT = 0};
+    self.executed_instructions_count = 0;
     self.regs = [0; 16];
     *self.pc() = RESET_HANDLER;
     self.output_texture = [0x00u8; 240 * 160 * 3];
@@ -402,9 +402,7 @@ impl GBA {
     } else {
       arm::execute_one_instruction(self).map_err(GBAError::ARM)?;
     }
-    unsafe {
-      COUNT += 1;
-    }
+      self.executed_instructions_count += 1;
     Ok(())
   }
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {

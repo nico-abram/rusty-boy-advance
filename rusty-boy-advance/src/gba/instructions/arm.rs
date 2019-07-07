@@ -69,7 +69,7 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
     0xD => Cond::LE,
     0xE => Cond::AL,
     0xF => Cond::NV,
-    _ => panic!("This is impossible"), //core::hint::unreachable_unchecked()
+    _ => unreachable!(), // We're matching on 4 bits
   }
 }
 /// Check if the condition for the given opcode is true
@@ -248,20 +248,62 @@ fn multiply(gba: &mut GBA, opcode: u32) -> ARMResult {
 }
 /// Halfword Data Transfer Register Offset (HDT_RO)
 fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u32) -> ARMResult {
+  gba.debug_print_fn.map(|f| f("halfword_data_transfer_immediate_or_register_offset\n"));
   let (is_pre_offseted, is_up, is_immediate_offset_else_register, write_back, is_load_else_store) =
     as_flags(opcode);
   let (rn, rd, immediate_offset_upper, opcode, lowest_nibble) = as_usize_nibbles(opcode);
   let opcode = (opcode >> 1) & 3;
+  gba.debug_print_fn.map(|f| f(format!("opcode:{}\n", opcode).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("is_load_else_store:{}\n", is_load_else_store).as_str()));
   let offset = if is_immediate_offset_else_register {
+    gba.debug_print_fn.map(|f| {
+      f(format!(
+        "immediate offset high:{:x} low:{:x} val:{:x}\n",
+        immediate_offset_upper,
+        lowest_nibble,
+        ((immediate_offset_upper as u32) << 4) + (lowest_nibble as u32)
+      )
+      .as_str())
+    });
     ((immediate_offset_upper as u32) << 4) + (lowest_nibble as u32)
   } else {
+    gba.debug_print_fn.map(|f| f(format!("reg offset lowest_nibble:{}\n", lowest_nibble).as_str()));
     gba.regs[lowest_nibble]
   };
+  gba.debug_print_fn.map(|f| f(format!("offset:{:x}\n", offset).as_str()));
   let mut addr = gba.regs[rn];
   if is_pre_offseted {
     addr += offset;
   }
   if is_load_else_store {
+    match opcode {
+      1 => {
+        // Load Unsigned halfword (zero-extended)
+        gba.debug_print_fn.map(|f| {
+          f(format!(
+            "loading Load Unsigned halfword (zero-extended) addr:{:x} va:{:x} extended:{:x}\n",
+            addr,
+            gba.fetch_u16(addr),
+            gba.fetch_u16(addr) as u32
+          )
+          .as_str())
+        });
+        gba.regs[rd] = gba.fetch_u16(addr) as u32;
+      }
+      2 => {
+        // Load Signed byte (sign extended)
+        gba.regs[rd] = gba.fetch_byte(addr) as i8 as i32 as u32;
+      }
+      3 => {
+        // Load Signed halfword (sign extended)
+        gba.regs[rd] = gba.fetch_u16(addr) as i16 as i32 as u32;
+      }
+      0 => std::panic!(
+        "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
+      ),
+      _ => unreachable!(), // It's 2 bits
+    }
+  } else {
     match opcode {
       1 => {
         // Store halfword
@@ -279,28 +321,9 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
       }
       0 => {
         // Reserved for SWP. Unreachable (Ensure we match SWP before this in decoding)
-        std::panic!("impossible") //core::hint::unreachable_unchecked()
+        unreachable!()
       }
-      _ => std::panic!("impossible"), //core::hint::unreachable_unchecked() // It's a nibble
-    }
-  } else {
-    match opcode {
-      1 => {
-        // Load Unsigned halfword (zero-extended)
-        gba.regs[rd] = gba.fetch_u16(addr) as u32;
-      }
-      2 => {
-        // Load Signed byte (sign extended)
-        gba.regs[rd] = gba.fetch_byte(addr) as i8 as i32 as u32;
-      }
-      3 => {
-        // Load Signed halfword (sign extended)
-        gba.regs[rd] = gba.fetch_u16(addr) as i16 as i32 as u32;
-      }
-      0 => std::panic!(
-        "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
-      ),
-      _ => std::panic!("impossible"), //core::hint::unreachable_unchecked() // It's a nibble
+      _ => unreachable!(), // It's 2 bits
     }
   }
   if !is_pre_offseted {
@@ -314,15 +337,32 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
 }
 /// Single Data Transfer (SDT)
 fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
+  gba.debug_print_fn.map(|f| f("single_data_transfer"));
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
+  gba.debug_print_fn.map(|f| f(format!("shifted_register:{}\n", shifted_register).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("rn:{}\n", rn).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("rd:{}\n", rd).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("first_byte:{:x}\n", first_byte).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("second_byte:{:x}\n", second_byte).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("third_byte:{:x}\n", third_byte).as_str()));
   let offset = if !shifted_register {
+    gba
+      .debug_print_fn
+      .map(|f| f(format!("immediate offset:{:x}\n", opcode & 0x0000_0FFF).as_str()));
     opcode & 0x0000_0FFF
   } else {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = second_byte;
     let register_value = gba.regs[first_byte];
+    gba.debug_print_fn.map(|f| f(format!("shifted reg shift_type:{}\n", shift_type).as_str()));
+    gba
+      .debug_print_fn
+      .map(|f| f(format!("shifted reg shift_amount:{:x}\n", shift_amount).as_str()));
+    gba
+      .debug_print_fn
+      .map(|f| f(format!("shifted reg register_value:{:x}\n", register_value).as_str()));
     match shift_type & 6 {
       0 => register_value.overflowing_shl(shift_amount).0,
       2 => register_value.overflowing_shr(shift_amount).0,
@@ -358,9 +398,6 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
     gba.regs[rd] = if is_byte_size {
       gba.debug_print_fn.map(|f| f(format!("byte_addr:{}\n", ((addr) / 4u32) * 4u32).as_str()));
       gba.debug_print_fn.map(|f| f(format!("byte_addr:{:x}\n", ((addr) / 4u32) * 4u32).as_str()));
-      gba
-        .debug_print_fn
-        .map(|f| f(format!("byte:{}\n", gba.fetch_byte(((addr) / 4u32) * 4u32)).as_str()));
       gba
         .debug_print_fn
         .map(|f| f(format!("byte:{:x}\n", gba.fetch_byte(((addr) / 4u32) * 4u32)).as_str()));

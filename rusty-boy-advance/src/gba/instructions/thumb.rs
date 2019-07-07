@@ -61,22 +61,36 @@ fn sign_flag(N: u32) -> bool {
 }
 
 fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
+  gba.debug_print_fn.map(|f| f("move_shifted_register\n"));
   let operation = as_bits_11_and_12(opcode);
   let (_, _, rs, rd) = as_lower_3bit_values(opcode);
   let offset = as_bits_6_to_10(opcode);
   let operand = gba.regs[rs];
+  gba.debug_print_fn.map(|f| f(format!("rs:{}\n", rs).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("rd:{}\n", rd).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("operand:{:x}\n", operand).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("offset:{:x}\n", offset).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("operation:{}\n", operation).as_str()));
   // TODO: Special 0 shifts
   let res = match operation {
     0 => operand << offset,
     1 => operand >> offset,
     2 => ((operand as i32) >> offset) as u32,
     3 => unimplemented!("reserved"),
-    _ => unimplemented!("Impossible?"), //core::hint::unreachable_unchecked()
+    _ => unreachable!(), // We're matching on 2 bits
   };
   gba.regs[rd] = res;
   gba.cpsr.set_all_status_flags(
     res,
-    if offset == 0 && operation == 0 { None } else { Some((operand >> (32 - offset)) & 1 != 0) },
+    if offset == 0 && operation == 0 {
+      None
+    } else {
+      Some(match operation {
+        0 => ((operand >> (32 - offset)) & 1) != 0,
+        1 | 2 => ((operand >> (offset - 1)) & 1) != 0,
+        _ => unreachable!(), // We crashed in the match above if we arent 0,1 or 2 already
+      })
+    },
     None,
   );
   gba.clocks += 0; // TODO: clocks
@@ -90,12 +104,14 @@ fn add_or_sub(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let first_operand = gba.regs[rs];
   let second_operand = if immediate { rn as u32 } else { gba.regs[rn] };
   gba.regs[rd] = if is_substraction {
-    let (result, overflow) = first_operand.overflowing_sub(second_operand);
+    let (result, _overflow) = first_operand.overflowing_sub(second_operand);
     //second_operand > first_operand
     gba.cpsr.set_all_status_flags(
       result,
       Some(borrow_from(first_operand, second_operand)),
-      Some(overflow),
+      Some(
+        ((first_operand ^ second_operand) as i32) < 0 && ((second_operand ^ result) as i32) >= 0,
+      ),
     );
     result
   } else {
@@ -148,7 +164,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
       res
     }
-    _ => unimplemented!(), //core::hint::unreachable_unchecked()
+    _ => unreachable!(), // It's 2 bits
   };
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -172,12 +188,19 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     0x2 => {
       //LSL (Logical Shift Left)
+      gba.debug_print_fn.map(|f| f("LSL\n"));
       let rs_val = rs_val & 0x00FF;
       let (result, _) = rd_val.overflowing_shl(rs_val);
       gba.regs[rd] = result;
+      gba.debug_print_fn.map(|f| f(format!("result:{:x}\n", result).as_str()));
+      gba.debug_print_fn.map(|f| f(format!("rs_val:{:x}\n", rs_val).as_str()));
+      gba.debug_print_fn.map(|f| f(format!("rd_val:{:x}\n", rd_val).as_str()));
+      gba
+        .debug_print_fn
+        .map(|f| f(format!("carry:{}\n", ((rd_val >> (32 - rs_val)) & 1) != 0).as_str()));
       gba.cpsr.set_all_status_flags(
         result,
-        if rs_val == 0 { None } else { Some((rd_val >> (32 - rs_val)) & 1 != 0) },
+        if rs_val == 0 { None } else { Some(((rd_val >> (32 - rs_val)) & 1) != 0) },
         None,
       );
     }
@@ -188,7 +211,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
-        if rs_val == 0 { None } else { Some((rd_val >> (rs_val - 1)) & 1 != 0) },
+        if rs_val == 0 { None } else { Some(((rd_val >> (rs_val - 1)) & 1) != 0) },
         None,
       );
     }
@@ -335,7 +358,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
       }
     }
-    _ => unimplemented!("Impossible"), //core::hint::unreachable_unchecked()
+    _ => unreachable!(), // It's 2 bits
   }
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -397,6 +420,7 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
 }
 /// LDR/STR {B}
 fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResult {
+  gba.debug_print_fn.map(|f| f("load_or_store_with_immediate_offset"));
   let is_byte_else_word = (opcode & 0x1000) != 0;
   let is_load_else_store = as_11th_bit(opcode);
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);

@@ -68,17 +68,29 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
     ));
   }
 }
-static mut GBA_LOGS: Option<VecDeque<String>> = None;
-const LOGS_SIZE: usize = 10_000;
-fn push_log(s: &str) {
-  unsafe {
-    let logs = GBA_LOGS.as_mut().unwrap();
-    logs.push_front(String::from(s));
-    logs.truncate(LOGS_SIZE);
+#[repr(transparent)]
+pub struct RacyUnsafeCell<T>(std::cell::UnsafeCell<T>);
+
+unsafe impl<T: Sync> Sync for RacyUnsafeCell<T> {}
+
+impl<T> RacyUnsafeCell<T> {
+  pub const fn new(x: T) -> Self {
+    RacyUnsafeCell(std::cell::UnsafeCell::new(x))
+  }
+  pub fn get(&self) -> *mut T {
+    self.0.get()
   }
 }
+const LOGS_SIZE: usize = 10_000;
+static mut GBA_LOGS: Option<RacyUnsafeCell<VecDeque<String>>> = None;
+
+fn push_log(s: &str) {
+  let logs = unsafe { &mut *GBA_LOGS.as_ref().unwrap().get() };
+  logs.push_front(String::from(s));
+  logs.truncate(LOGS_SIZE);
+}
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-  unsafe { GBA_LOGS = Some(VecDeque::with_capacity(LOGS_SIZE)) };
+  unsafe { GBA_LOGS = Some(RacyUnsafeCell::new(VecDeque::with_capacity(LOGS_SIZE))) };
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
   let mut gba = GBABox::new(LogLevel::Debug, None, Some(push_log));
@@ -97,6 +109,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut running = false;
   let mut just_clicked_continue = false;
   let mut rom_open_msg = None;
+  let mut variable_step = 0;
   let mut browsed_memory = BrowsedMemory {
     mem: BrowsableMemory::BIOS,
     chunk_size: 4,
@@ -231,6 +244,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line(0.0);
           ui.text("Step(100000)");
+          if ui.button(im_str!("#6"), icon_size) {
+            for _ in 0..variable_step {
+              gba.run_one_instruction().unwrap();
+            }
+          }
+          ui.same_line(0.0);
+          ui.text("Step(");
+          ui.same_line(0.0);
+          let _pushed_width = ui.push_item_width(120.0);
+          ui.input_int(im_str!(")##7"), &mut variable_step).step(0).build();
         }
       });
     ui.window(im_str!("ROM Loading"))
@@ -364,7 +387,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       .size([1024.0, 285.0], Condition::Appearing)
       .always_vertical_scrollbar(true)
       .build(|| {
-        for log_line in unsafe { GBA_LOGS.as_ref().unwrap().iter().rev() } {
+        for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().rev() {
           ui.text(log_line);
         }
       });

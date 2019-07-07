@@ -2,4 +2,5 @@
 [alias]
 im = "run --bin rusty-boy-advance-imgui --release"
 be = "run --bin rusty-boy-advance-beryllium --release"
+bei = "run --bin rusty-boy-advance-beryllium --release -- -l 2 -r e.gba -i "
 qu = "run --bin rusty-boy-advance-quicksilver --release"
