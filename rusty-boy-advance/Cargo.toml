@@ -13,7 +13,6 @@ categories = ["emulators", "no-std"]
 license = "MIT"
 
 [dependencies]
-#byteorder = "1.3.2"
 
 [features]
 default = ["std"]

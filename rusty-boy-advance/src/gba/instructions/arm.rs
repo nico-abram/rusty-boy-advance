@@ -246,7 +246,7 @@ fn multiply(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.clocks += 0; // todo:clocks
   Ok(())
 }
-/// Halfword Data Transfer Register Offset (HDT_RO)
+/// Halfword Data Transfer Register Offset (HDT_RO or HDT_IO)
 fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.debug_print_fn.map(|f| f("halfword_data_transfer_immediate_or_register_offset\n"));
   let (is_pre_offseted, is_up, is_immediate_offset_else_register, write_back, is_load_else_store) =
@@ -272,8 +272,10 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
   };
   gba.debug_print_fn.map(|f| f(format!("offset:{:x}\n", offset).as_str()));
   let mut addr = gba.regs[rn];
+  let add_offset: fn(u32, u32) -> u32 =
+    if is_up { |addr, offset| addr + offset } else { |addr, offset| addr - offset };
   if is_pre_offseted {
-    addr += offset;
+    addr = add_offset(addr, offset);
   }
   if is_load_else_store {
     match opcode {
@@ -327,7 +329,7 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     }
   }
   if !is_pre_offseted {
-    addr += offset;
+    addr = add_offset(addr, offset);
   }
   if !is_pre_offseted || write_back {
     gba.regs[rn] = addr;
@@ -337,32 +339,15 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
 }
 /// Single Data Transfer (SDT)
 fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
-  gba.debug_print_fn.map(|f| f("single_data_transfer"));
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
   let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
-  gba.debug_print_fn.map(|f| f(format!("shifted_register:{}\n", shifted_register).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("rn:{}\n", rn).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("rd:{}\n", rd).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("first_byte:{:x}\n", first_byte).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("second_byte:{:x}\n", second_byte).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("third_byte:{:x}\n", third_byte).as_str()));
   let offset = if !shifted_register {
-    gba
-      .debug_print_fn
-      .map(|f| f(format!("immediate offset:{:x}\n", opcode & 0x0000_0FFF).as_str()));
     opcode & 0x0000_0FFF
   } else {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = second_byte;
     let register_value = gba.regs[first_byte];
-    gba.debug_print_fn.map(|f| f(format!("shifted reg shift_type:{}\n", shift_type).as_str()));
-    gba
-      .debug_print_fn
-      .map(|f| f(format!("shifted reg shift_amount:{:x}\n", shift_amount).as_str()));
-    gba
-      .debug_print_fn
-      .map(|f| f(format!("shifted reg register_value:{:x}\n", register_value).as_str()));
     match shift_type & 6 {
       0 => register_value.overflowing_shl(shift_amount).0,
       2 => register_value.overflowing_shr(shift_amount).0,
@@ -379,28 +364,14 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let mut addr = gba.regs[rn];
   let add_offset =
     |addr| (i64::from(addr) + if is_up { i64::from(offset) } else { -i64::from(offset) }) as u32;
-  gba.debug_print_fn.map(|f| {
-    f(format!("offset i64:{}\n", if is_up { i64::from(offset) } else { -i64::from(offset) })
-      .as_str())
-  });
-  gba.debug_print_fn.map(|f| f(format!("is_pre_offseted:{}\n", is_pre_offseted).as_str()));
   if is_pre_offseted {
     addr = add_offset(addr);
   }
   if rn == 15 {
     addr += 4;
   }
-  gba.debug_print_fn.map(|f| f(format!("addr:{}\n", addr).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("addr:{:x}\n", addr).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("is_load:{}\n", is_load).as_str()));
-  gba.debug_print_fn.map(|f| f(format!("is_byte_size:{}\n", is_byte_size).as_str()));
   if is_load {
     gba.regs[rd] = if is_byte_size {
-      gba.debug_print_fn.map(|f| f(format!("byte_addr:{}\n", ((addr) / 4u32) * 4u32).as_str()));
-      gba.debug_print_fn.map(|f| f(format!("byte_addr:{:x}\n", ((addr) / 4u32) * 4u32).as_str()));
-      gba
-        .debug_print_fn
-        .map(|f| f(format!("byte:{:x}\n", gba.fetch_byte(((addr) / 4u32) * 4u32)).as_str()));
       // Least significant byte
       u32::from(gba.fetch_byte(addr))
     } else {
@@ -625,7 +596,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     }
     2 => {
       //sub
-      let (result, overflow) = rn.overflowing_sub(op2);
+      let (result, _overflow) = rn.overflowing_sub(op2);
       *res = result;
       set_all_flags(
         *res,
@@ -635,7 +606,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     }
     3 => {
       //rsb
-      let (result, overflow) = op2.overflowing_sub(rn);
+      let (result, _overflow) = op2.overflowing_sub(rn);
       *res = result;
       set_all_flags(
         *res,

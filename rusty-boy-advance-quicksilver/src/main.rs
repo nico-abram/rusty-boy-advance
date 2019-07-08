@@ -18,7 +18,10 @@ impl State for GameState {
 
   fn draw(&mut self, window: &mut Window) -> Result<()> {
     window.clear(Color::WHITE)?;
-    self.gba.run_one_frame().unwrap();
+    self
+      .gba
+      .run_one_frame()
+      .map_err(|_| quicksilver::Error::ContextError(String::from("Error running a GBA frame")))?;
     let mut a = [0u8; 240 * 160 * 3];
     for (idx, x) in self.gba.video_output().iter().enumerate() {
       a[idx] = *x;

@@ -97,7 +97,6 @@ impl GBA {
     print_fn: Option<fn(&str) -> ()>,
   ) -> Box<Self> {
     let nothing = |_: &mut GBA| {};
-    let nothing_with_str = |_: &str| {};
     let nothing_with_opcode = |_: &mut GBA, _: u32| {};
     let print_opcode = |gba: &mut GBA, opcode: u32| {
       gba.print_fn.map(|f| f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str()));
