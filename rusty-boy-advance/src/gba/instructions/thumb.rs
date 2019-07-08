@@ -461,6 +461,7 @@ fn load_or_store_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let addr = offset.overflowing_add(gba.regs[rb]).0;
   if is_load_else_store {
     gba.regs[rd] = u32::from(gba.fetch_u16(addr));
+  } else {
     gba.write_u16(addr, gba.regs[rd] as u16);
   }
   gba.clocks += 0; // TODO: clocks
