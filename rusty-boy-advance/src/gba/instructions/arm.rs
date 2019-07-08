@@ -397,7 +397,6 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (rn, _, _, _, _) = as_usize_nibbles(opcode);
   let (rlist2, rlist1) = (((opcode & 0x0000_FF00) >> 8) as u8, (opcode & 0x0000_00FF) as u8);
   let rlists = [rlist1, rlist2];
-  // TODO: Should that be (rlist1 & 0x1) ?
   let is_psr = psr_or_user_mode && is_load_else_store && ((rlist2 & 0x80) != 0);
   let get_mut_reg: fn(&mut GBA, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
     // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
@@ -535,7 +534,6 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     } else {
-      //TODO:carry(Are they right??)
       gba.debug_print_fn.map(|f| f(format!("shift_type:{}\n", shift_type).as_str()));
       match shift_type {
         0 => (

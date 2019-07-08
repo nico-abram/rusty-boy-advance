@@ -228,13 +228,17 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     0x5 => {
       // ADC (Add With Carry)
-      let (result, overflow) = rd_val.overflowing_add(rs_val);
-      let (result, overflow2) = result.overflowing_add(gba.cpsr.carry_flag() as u32);
+      let (op2_plus_carry, overflow_when_adding_op2_and_carry) =
+        rs_val.overflowing_add(gba.cpsr.carry_flag() as u32);
+      let (result, overflow) = rd_val.overflowing_add(op2_plus_carry);
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
-        Some(carry_from(rd_val, rs_val + (gba.cpsr.carry_flag() as u32), result)), // TODO: Account for overflow in rs+C
-        Some(overflow || overflow2),
+        Some(
+          overflow_when_adding_op2_and_carry
+            || carry_from(rd_val, rs_val + (gba.cpsr.carry_flag() as u32), result),
+        ),
+        Some(overflow_when_adding_op2_and_carry || overflow),
       );
     }
     0x6 => {
@@ -338,9 +342,13 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
     1 => {
       //CMP
       let (op1, op2) = (gba.regs[rd], gba.regs[rs]);
-      let (res, overflow) = op1.overflowing_sub(op2);
+      let (res, _overflow) = op1.overflowing_sub(op2);
       // TODO: Is this check right?
-      gba.cpsr.set_all_status_flags(res, Some(borrow_from(op1, op2)), Some(overflow));
+      gba.cpsr.set_all_status_flags(
+        res,
+        Some(borrow_from(op1, op2)),
+        Some(((op1 ^ op2) as i32) < 0 && ((op2 ^ res) as i32) >= 0),
+      );
     }
     2 => {
       // MOV
@@ -381,7 +389,6 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
   let (addr, _) = gba.regs[ro].overflowing_add(gba.regs[rb]);
   if is_load {
     if is_byte_else_word {
-      // TODO: Does this zero extend the 32bit value?
       gba.write_u8(addr, gba.regs[rd] as u8);
     } else {
       gba.write_u32(addr, gba.regs[rd]);
@@ -624,7 +631,7 @@ fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
   const T: bool = true;
   const F: bool = false;
   Ok(match bits15_8.as_bools() {
-    [F, F, F, T, T, _, _, _] => add_or_sub, /* TODO: The ARM7TDMI manual says 0b000111 but GBATEK 0x00011 */
+    [F, F, F, T, T, _, _, _] => add_or_sub, /* The ARM7TDMI manual says 0b000111 but GBATEK 0x00011. In GBATEK we trust */
     [F, F, F, _, _, _, _, _] => move_shifted_register,
     [F, F, T, _, _, _, _, _] => immediate_operation,
     [F, T, F, F, F, F, _, _] => alu_operation,
