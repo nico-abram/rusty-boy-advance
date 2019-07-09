@@ -1,6 +1,7 @@
 /target
 **/*.rs.bk
 /.vscode
+/rusty-boy-advance/src/gba/disassembly
 diff.bat
 
 *.log

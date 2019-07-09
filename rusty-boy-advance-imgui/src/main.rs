@@ -171,7 +171,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.columns(2, im_str!("a"), true);
         let cpsr = gba.cpsr();
         ui.text(format!(
-          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}",
+          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}\n{}",
           cpsr.negative_flag(),
           cpsr.carry_flag(),
           cpsr.zero_flag(),
@@ -179,6 +179,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           cpsr.irq_disabled_flag(),
           cpsr.fiq_disabled_flag(),
           cpsr.thumb_state_flag(),
+          cpsr.mode(),
           cpsr.mode()
         ));
         ui.set_column_offset(1, 80.0);
@@ -361,7 +362,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               browsed_memory.last_update = std::time::Instant::now();
             }
             ui.columns(2, im_str!("memory contents"), true);
-            ui.set_column_offset(1, 150.0);
+            ui.set_column_offset(1, 100.0);
             ui.text("Address");
             ui.next_column();
             ui.text("Value");
