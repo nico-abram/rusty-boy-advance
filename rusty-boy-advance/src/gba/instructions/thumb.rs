@@ -402,10 +402,12 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
 }
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
+  gba.debug_print_fn.map(|f| f("load_or_store_sign_extended_byte_or_halfword\n"));
   let H = as_11th_bit(opcode);
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let sign_extend = (opcode & 0x0400) != 0;
   let addr = gba.regs[rb].overflowing_add(gba.regs[ro]).0;
+  gba.debug_print_fn.map(|f| f(format!("addr:{}\n", addr).as_str()));
   if !H && !sign_extend {
     gba.write_u16(addr, gba.regs[rd] as u16);
     gba.clocks += 0; // TODO: clocks
@@ -454,6 +456,7 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
 }
 /// LDR/STR H
 fn load_or_store_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
+  gba.debug_print_fn.map(|f| f("load_or_store_halfword"));
   let is_load_else_store = as_11th_bit(opcode);
   let (_, _, rb, rd) = as_lower_3bit_values(opcode);
   let offset = as_bits_6_to_10(opcode);
