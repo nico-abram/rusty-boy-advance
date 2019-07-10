@@ -1,7 +1,3 @@
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-#![allow(dead_code)]
-
 use super::super::{
   cpsr::{borrow_from, carry_from},
   gba::GBA,
@@ -54,10 +50,6 @@ fn as_low_byte(opcode: u16) -> u8 {
 #[inline]
 fn as_bits_11_and_12(opcode: u16) -> u16 {
   (opcode >> 11) & 0x3
-}
-#[inline]
-fn sign_flag(N: u32) -> bool {
-  (N >> 31) == 1
 }
 
 fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
@@ -243,16 +235,18 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     0x6 => {
       // SBC (Substract With Carry)
-      let (result, overflow) = rd_val.overflowing_sub(rs_val);
-      let (result, overflow2) = result.overflowing_sub((!gba.cpsr.carry_flag()) as u32);
+      let (value_to_substract, overflow_in_op2) =
+        rs_val.overflowing_add((!gba.cpsr.carry_flag()) as u32);
+      let (result, _) = rd_val.overflowing_sub(value_to_substract);
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
+        Some(borrow_from(rd_val, value_to_substract) || overflow_in_op2),
         Some(
-          borrow_from(rd_val, rs_val.overflowing_add((!gba.cpsr.carry_flag()) as u32).0)
-            || overflow2,
+          overflow_in_op2
+            || (((rd_val ^ value_to_substract) as i32) < 0
+              && ((value_to_substract ^ result) as i32) >= 0),
         ),
-        Some(overflow || overflow2),
       );
     }
     0x7 => {
@@ -278,9 +272,13 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     0x9 => {
       // NEG (Negate)
-      let (result, overflow) = 0u32.overflowing_sub(rs_val);
+      let (result, _overflow) = 0u32.overflowing_sub(rs_val);
       gba.regs[rd] = result;
-      gba.cpsr.set_all_status_flags(result, Some(borrow_from(0, rs_val)), Some(overflow));
+      gba.cpsr.set_all_status_flags(
+        result,
+        Some(borrow_from(0, rs_val)),
+        Some(((0 ^ rs_val) as i32) < 0 && ((rs_val ^ result) as i32) >= 0),
+      );
     }
     0xA => {
       // CMP (Compare)
@@ -361,7 +359,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       let rs_val = gba.regs[rs];
       gba.cpsr.set_thumb_state_flag((rs_val & 0x0000_0001) != 0);
       if rs == 15 {
-        gba.regs[15] = rs_val & 0xFFFF_FFFC;
+        gba.regs[15] = (rs_val & 0xFFFF_FFFC) + 4;
       } else {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
       }
@@ -388,14 +386,14 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
   let is_byte_else_word = (opcode & 0x0400) != 0;
   let (addr, _) = gba.regs[ro].overflowing_add(gba.regs[rb]);
   if is_load {
+    gba.regs[rd] =
+      if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else { gba.fetch_u32(addr) };
+  } else {
     if is_byte_else_word {
       gba.write_u8(addr, gba.regs[rd] as u8);
     } else {
       gba.write_u32(addr, gba.regs[rd]);
     }
-  } else {
-    gba.regs[rd] =
-      if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else { gba.fetch_u32(addr) };
   }
   gba.clocks += 0; // TODO: clocks
   Ok(())
@@ -403,17 +401,17 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
   gba.debug_print_fn.map(|f| f("load_or_store_sign_extended_byte_or_halfword\n"));
-  let H = as_11th_bit(opcode);
+  let is_halfword = as_11th_bit(opcode);
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let sign_extend = (opcode & 0x0400) != 0;
   let addr = gba.regs[rb].overflowing_add(gba.regs[ro]).0;
   gba.debug_print_fn.map(|f| f(format!("addr:{}\n", addr).as_str()));
-  if !H && !sign_extend {
+  if !is_halfword && !sign_extend {
     gba.write_u16(addr, gba.regs[rd] as u16);
     gba.clocks += 0; // TODO: clocks
     return Ok(());
   }
-  gba.regs[rd] = if H {
+  gba.regs[rd] = if is_halfword {
     // Half-word(16 bits)
     if sign_extend {
       (i32::from(gba.fetch_u16(addr) as i16) as u32) // Sign extend
@@ -708,8 +706,6 @@ mod tests {
   #[allow(clippy::identity_op)]
   fn decode_thumb_raw(opcode: u16) -> ThumbInstruction {
     let bits15_8 = (opcode >> 8) as u8;
-    const T: bool = true;
-    const F: bool = false;
     match bits15_8 {
       x if (x & 0b1111_1100) == 0b0001_1100 => add_or_sub,
       x if (x & 0b1110_0000) == 0b0000_0000 => move_shifted_register,

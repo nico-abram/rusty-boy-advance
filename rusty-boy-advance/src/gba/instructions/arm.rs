@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use alloc::{format, string::String};
 
 use super::super::{
@@ -210,7 +208,7 @@ fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
 /// Multiply long (MULL)
 fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
   //TODO: Accumulate?
-  let (_, _, signed, accumulate, set_cond_flags) = as_flags(opcode);
+  let (_, _, signed, _accumulate, set_cond_flags) = as_flags(opcode);
   let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
   let res: u64 = if signed {
     return Err(String::from("No support for signed long multiplication"));
@@ -467,7 +465,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
     |gba, x| &mut gba.regs[x]
   };
   let mut sp = *get_mut_reg(gba, rn);
-  let operation: fn(&mut u32, u32) = if !is_up {
+  let offseting_operation: fn(&mut u32, u32) = if !is_up {
     |sp, offset| {
       *sp -= offset;
     }
@@ -476,22 +474,21 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
       *sp += offset;
     }
   };
-  // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
   let is_push = !is_load_else_store;
-  if is_push {
+  let push_or_pop_operation: fn(&mut GBA, usize, u32) = if is_push {
+    |gba, reg, sp| gba.write_u32(sp, gba.regs[reg])
+  } else {
+    |gba, reg, sp| gba.regs[reg] = gba.fetch_u32(sp)
+  };
+  // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
+  // So we use regular fors (For now)
+  if is_pre_offseted {
     for (byte_number, byte) in rlists.iter().enumerate().rev() {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
         if bit_is_set {
           let bit_number = byte_number * 8 + bit_in_byte;
-          // Pre//Post offsetting matters if we're storing the base register
-          if is_pre_offseted {
-            operation(&mut sp, 4);
-          }
-          let val = *get_mut_reg(gba, bit_number);
-          gba.write_u32(sp, val);
-          if !is_pre_offseted {
-            operation(&mut sp, 4);
-          }
+          offseting_operation(&mut sp, 4);
+          push_or_pop_operation(gba, bit_number, sp);
         }
       }
     }
@@ -500,13 +497,8 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate() {
         if bit_is_set {
           let bit_number = byte_number * 8 + bit_in_byte;
-          if is_pre_offseted {
-            operation(&mut sp, 4);
-          }
-          *get_mut_reg(gba, bit_number) = gba.fetch_u32(sp);
-          if !is_pre_offseted {
-            operation(&mut sp, 4);
-          }
+          push_or_pop_operation(gba, bit_number, sp);
+          offseting_operation(&mut sp, 4);
         }
       }
     }
@@ -609,7 +601,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         3 => (
           register_value.rotate_right(shift_amount),
           if shift_amount != 0 {
-            Some(((register_value >> (shift_amount - 1)) & 1) != 0)
+            Some(((register_value.overflowing_shr(shift_amount - 1).0) & 1) != 0)
           } else {
             None
           },

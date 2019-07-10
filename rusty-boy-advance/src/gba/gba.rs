@@ -253,6 +253,7 @@ impl GBA {
   }
   /// The GBA GBA always runs in LE mode
   pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
+    self.debug_print_fn.map(|f| f(format!("\twriting to addr {:x} value {:x}\n", addr, byte).as_str()));
     let addr = addr as usize;
     match addr {
       //General Internal Memory
@@ -307,8 +308,8 @@ impl GBA {
     }
   }
   pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
-    self.write_u8(addr + 1, (value >> 8) as u8);
     self.write_u8(addr, value as u8);
+    self.write_u8(addr + 1, (value >> 8) as u8);
   }
   pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
     self.write_u16(addr, value as u16);
@@ -436,8 +437,5 @@ impl GBA {
     loop {
       self.run_one_frame()?;
     }
-  }
-  pub(crate) fn vblank(&mut self) -> u32 {
-    self.fetch_u32(0x0300_7FFC)
   }
 }
