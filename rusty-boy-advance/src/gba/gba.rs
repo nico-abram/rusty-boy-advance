@@ -304,7 +304,7 @@ impl GBA {
       0x0E00_0000..=0x0E00_FFFF => {
         self.game_pak[addr & 0x01FF_FFFF] = byte;
       } /* Game Pak SRAM    (max 64 KBytes) - 8bit Bus width */
-      _ => unimplemented!("Invalid address: {:x}", addr),
+      _ => ()//unimplemented!("Invalid address: {:x}", addr),
     }
   }
   pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
@@ -336,7 +336,6 @@ impl GBA {
   pub fn reset(&mut self) {
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
-    *self.pc() = RESET_HANDLER;
     self.output_texture = [0x00u8; 240 * 160 * 3];
     self.fiq_only_banks = [[0u32; 5]; 2];
     self.all_modes_banks = [[0u32; 2]; 6];
@@ -358,7 +357,9 @@ impl GBA {
     self.game_pak = box [0u8; 32 * MB];
     self.game_pak_sram = [0u8; 64 * KB];
     self.clocks = 0u32;
-    self.regs[13] = 0x0300_7F00; // Taken from mrgba
+    self.regs[13] = 0x0300_7F00; // Taken from mgba
+    self.regs[15] = RESET_HANDLER;
+    //self.regs[15] = 0x0800_0000;
   }
   /// Load a ROM from a reader
   pub fn load(&mut self, rom_bytes: &[u8]) -> Result<(), Box<GBAError>> {
@@ -403,13 +404,35 @@ impl GBA {
       arm::execute_one_instruction(self).map_err(GBAError::ARM)?;
     }
       self.executed_instructions_count += 1;
+      self.update_hvblank();
     Ok(())
   }
+  fn update_hvblank(&mut self) {
+    let column_offset = self.clocks % 1232;
+    let row_offset = (self.clocks / 1232) % 228;
+
+    let hblank = column_offset >= 960;
+    let vblank = row_offset >= 160;
+
+    let prev_status = self.fetch_u16(0x0400_0004);
+    //let prev_vcount = self.fetch_u16(0x0400_0006);
+
+    let new_status = (prev_status & 0b1111_1111_1111_1100) |
+      if hblank { 1 << 1 } else {0} |
+      if vblank { 1 } else {0};
+
+    self.write_u16(0x0400_0006, (row_offset & 0xFF) as u16);
+    self.write_u16(0x0400_0004, new_status);
+  }
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
-    // TODO: However this is meant to be done
+    // TODO: Make this actually run for 1 frame
     for _ in 0..1000 {
       self.run_one_instruction()?;
     }
+    self.update_video_output();
+    Ok(())
+  }
+  fn update_video_output(&mut self) {
     match self.io_mem[0] & 0x0000_0007{
       0 => (),
       1 => (),
@@ -431,7 +454,6 @@ impl GBA {
       5 => (),
       _ => ()
     }
-    Ok(())
   }
   pub fn run_forever(&mut self) -> Result<(), GBAError> {
     loop {

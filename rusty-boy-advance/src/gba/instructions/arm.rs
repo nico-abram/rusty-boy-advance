@@ -208,15 +208,32 @@ fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
 /// Multiply long (MULL)
 fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
   //TODO: Accumulate?
-  let (_, _, signed, _accumulate, set_cond_flags) = as_flags(opcode);
-  let (rdhigh, rdlow, rn, _, rm) = as_usize_nibbles(opcode);
-  let res: u64 = if signed {
-    return Err(String::from("No support for signed long multiplication"));
+  let (is_unsupported, store_double_word_result, signed, accumulate, set_cond_flags) =
+    as_flags(opcode);
+  let (rdhigh_aka_rd, rdlow_aka_rn, rs, _, rm) = as_usize_nibbles(opcode);
+  if is_unsupported {
+    return Err(String::from(
+      "No support for SMLAxy, SMLAWy, SMLALxy, SMULxy and SMULWy (Signed Halfword Multiply)",
+    ));
+  }
+  let mut res: u64 = if signed {
+    (i64::from(gba.fetch_reg(rs)) * i64::from(gba.fetch_reg(rm))) as u64
   } else {
-    u64::from(gba.fetch_reg(rn)) * u64::from(gba.fetch_reg(rm))
+    u64::from(gba.fetch_reg(rs)) * u64::from(gba.fetch_reg(rm))
   };
-  *gba.reg_mut(rdhigh) = (res) as u32;
-  *gba.reg_mut(rdlow) = (res >> 32) as u32;
+  if accumulate {
+    res += if store_double_word_result {
+      gba.regs[rdhigh_aka_rd] as u64
+    } else {
+      gba.regs[rdlow_aka_rn] as u64 + ((gba.regs[rdhigh_aka_rd] as u64) << 32)
+    };
+  }
+  if store_double_word_result {
+    gba.regs[rdlow_aka_rn] = (res) as u32;
+    gba.regs[rdhigh_aka_rd] = (res >> 32) as u32;
+  } else {
+    gba.regs[rdhigh_aka_rd] = (res) as u32;
+  }
   if set_cond_flags {
     // TODO: Are Z and N set using the 64bit value
     // or just the upper word or lower word?
@@ -568,7 +585,11 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
           (register_value as i32).overflowing_shr(32).0 as u32,
           Some((register_value & 0x8000_0000) != 0),
         ),
-        3 => unimplemented!("TODO: RRX"),
+        3 => (
+          (register_value as i32).overflowing_shr(1).0 as u32
+            | if gba.cpsr.carry_flag() { 0x8000_0000 } else { 0 },
+          Some((register_value & 0x0000_0001) != 0),
+        ),
         _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     } else {
