@@ -19,12 +19,14 @@ enum BrowsableMemory {
   VRAM,
   Palette,
   OAM,
+  IO,
 }
 fn offset(mem: BrowsableMemory) -> u32 {
   match mem {
     BrowsableMemory::BIOS => 0,
     BrowsableMemory::BoardWRAM => 0x0200_0000,
     BrowsableMemory::ChipWRAM => 0x0300_0000,
+    BrowsableMemory::IO => 0x0400_0000,
     BrowsableMemory::Palette => 0x0500_0000,
     BrowsableMemory::VRAM => 0x0600_0000,
     BrowsableMemory::OAM => 0x0700_0000,
@@ -36,6 +38,7 @@ fn get_memory(gba: &GBABox, mem: BrowsableMemory) -> &[u8] {
     BrowsableMemory::BIOS => gba.bios_bytes(),
     BrowsableMemory::BoardWRAM => gba.board_wram_bytes(),
     BrowsableMemory::ChipWRAM => gba.chip_wram_bytes(),
+    BrowsableMemory::IO => gba.io_memory(),
     BrowsableMemory::Palette => gba.palette_bytes(),
     BrowsableMemory::VRAM => gba.vram_bytes(),
     BrowsableMemory::ROM => gba.loaded_rom().unwrap().game_pak(),
@@ -318,6 +321,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         ui.same_line(0.0);
         if ui.radio_button(im_str!("VRAM"), &mut browsed_memory.mem, BrowsableMemory::VRAM) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+        }
+        ui.same_line(0.0);
+        if ui.radio_button(im_str!("I/O"), &mut browsed_memory.mem, BrowsableMemory::IO) {
           update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
         ui.same_line(0.0);

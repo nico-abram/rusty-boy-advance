@@ -28,6 +28,9 @@ impl GBABox {
   pub fn video_output(&self) -> &[u8] {
     &self.internal_gba.output_texture[..]
   }
+  pub fn io_memory(&self) -> &[u8] {
+    &self.internal_gba.io_mem[..]
+  }
   pub fn loaded_rom(&self) -> Option<&Rom> {
     self.internal_gba.loaded_rom.as_ref()
   }
