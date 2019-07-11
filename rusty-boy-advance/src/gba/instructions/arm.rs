@@ -582,7 +582,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         0 => (register_value, None),
         1 => (0, Some((register_value & 0x8000_0000) != 0)),
         2 => (
-          (register_value as i32).overflowing_shr(32).0 as u32,
+          (register_value as i32).overflowing_shr(31).0 as u32,
           Some((register_value & 0x8000_0000) != 0),
         ),
         3 => (
@@ -630,8 +630,9 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     };
-    (op2, if lowest_byte == 0 { None } else { shift_carry })
+    (op2, if shift_by_register && third_byte == 0 { None } else { shift_carry })
   };
+  gba.debug_print_fn.map(|f| f(format!("op2:{}\n", op2).as_str()));
   let res = &mut gba.regs[rd];
   let cpsr = gba.cpsr;
   let ref_cpsr = &mut gba.cpsr;
