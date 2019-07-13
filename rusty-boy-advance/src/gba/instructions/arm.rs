@@ -95,7 +95,7 @@ pub(crate) fn check_cond(gba: &mut GBA, opcode: u32) -> bool {
     Cond::NV => false,
   };
   if applies {
-    gba.clocks += 1;
+    gba.clocks += gba.sequential_cycle();
   }
   !applies
 }
@@ -138,8 +138,7 @@ fn as_extra_flag(opcode: u32) -> bool {
 /// Branch and Exchange (BX)
 /// If the condition is true, branch and switch mode
 fn branch_and_exchange(gba: &mut GBA, opcode: u32) -> ARMResult {
-  gba.clocks += 3; // TODO: Clocks
-                   // Address to jump to is in a register given by lowest nibble
+  // Address to jump to is in a register given by lowest nibble
   let reg_n = opcode & 0x0000_000F;
   let mut jmp_addr = gba.regs[reg_n as usize];
   // It doesn't *actually* switch mode, a bit tells us what to set it to
@@ -148,7 +147,8 @@ fn branch_and_exchange(gba: &mut GBA, opcode: u32) -> ARMResult {
     jmp_addr -= 1;
     gba.cpsr.set_thumb_state_flag(true);
   }
-  *gba.pc() = jmp_addr;
+  gba.regs[15] = jmp_addr;
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// Branch or Branch and link (B or BL)
@@ -157,7 +157,6 @@ fn branch_and_exchange(gba: &mut GBA, opcode: u32) -> ARMResult {
 /// LR (Register 14). If using nested functions, that requires pushing LR onto the stack.
 fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
   gba.debug_print_fn.map(|f| f("branch_or_branch_and_link\n"));
-  gba.clocks += 3; // TODO: Clocks
   let offset = (opcode & 0x007F_FFFF) << 2; //*4
   let is_positive = (opcode & 0x0080_0000) == 0;
   let is_branch_and_link = (opcode & 0x0100_0000) != 0;
@@ -173,6 +172,7 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
       pc.overflowing_sub(!(offset | 0xFF00_0003) + 4).0
     })
     .0;
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// Software Interrupt (SWI)
@@ -180,10 +180,10 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
 /// Used to call BIOS functions
 pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
   gba.set_mode(CpuMode::Supervisor);
-  *gba.pc() = SWI_HANDLER;
+  gba.regs[15] = SWI_HANDLER;
   gba.cpsr.set_thumb_state_flag(false); // Set ARM state
   gba.cpsr.set_irq_disabled_flag(true);
-  gba.clocks += 0; // todo:clocks
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// Single data swap (SWP)
@@ -196,18 +196,20 @@ fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
     // It refers to STR/LDR, which says
     // "When reading a byte from memory, upper 24 bits of Rd are zero-extended."
     // I'm assuming that literally means the upper bits and not the most significant ones
-    *gba.reg_mut(rd) = (*gba.reg_mut(rn)) & 0x0000_00FF;
-    *gba.reg_mut(rn) = (*gba.reg_mut(rm)) & 0x0000_00FF;
+    gba.regs[rd] = gba.regs[rn] & 0x0000_00FF;
+    gba.regs[rn] = gba.regs[rm] & 0x0000_00FF;
   } else {
-    *gba.reg_mut(rd) = *gba.reg_mut(rn);
-    *gba.reg_mut(rn) = *gba.reg_mut(rm);
+    gba.regs[rd] = gba.regs[rn];
+    gba.regs[rn] = gba.regs[rm];
   }
-  gba.clocks += 0; // todo:clocks
+  gba.clocks += gba.sequential_cycle()
+    + gba.nonsequential_cycle()
+    + gba.nonsequential_cycle()
+    + gba.internal_cycle();
   Ok(())
 }
 /// Multiply long (MULL)
 fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
-  //TODO: Accumulate?
   let (is_unsupported, store_double_word_result, signed, accumulate, set_cond_flags) =
     as_flags(opcode);
   let (rdhigh_aka_rd, rdlow_aka_rn, rs, _, rm) = as_usize_nibbles(opcode);
@@ -217,9 +219,9 @@ fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
     ));
   }
   let mut res: u64 = if signed {
-    (i64::from(gba.fetch_reg(rs)) * i64::from(gba.fetch_reg(rm))) as u64
+    (i64::from(gba.regs[rs]) * i64::from(gba.regs[rm])) as u64
   } else {
-    u64::from(gba.fetch_reg(rs)) * u64::from(gba.fetch_reg(rm))
+    u64::from(gba.regs[rs]) * u64::from(gba.regs[rm])
   };
   if accumulate {
     res += if store_double_word_result {
@@ -241,7 +243,12 @@ fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
     gba.cpsr.set_negative_flag((res & 0x8000_0000_0000_0000) != 0);
     gba.cpsr.set_carry_flag(false); //C=destroyed (ARMv4 and below)
   }
-  gba.clocks += 0; // todo:clocks
+  let internal_cycles = 1
+    + if res & 0x0000_FF00 != 0 || (signed && res & 0x0000_FF00 == 0x0000_FF00) { 1 } else { 0 }
+    + if res & 0x00FF_0000 != 0 || (signed && res & 0x00FF_0000 == 0x00FF_0000) { 1 } else { 0 }
+    + if res & 0xFF00_0000 != 0 || (signed && res & 0xFF00_0000 == 0xFF00_0000) { 1 } else { 0 };
+  gba.clocks += gba.sequential_cycle()
+    + gba.internal_cycle() * (internal_cycles + if accumulate { 2 } else { 1 });
   Ok(())
 }
 /// Multiply (MUL)
@@ -249,16 +256,21 @@ fn multiply(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
-    gba.fetch_reg(rn).overflowing_mul(gba.fetch_reg(rm)).0.overflowing_add(gba.fetch_reg(rd)).0
+    gba.regs[rn].overflowing_mul(gba.regs[rm]).0.overflowing_add(gba.regs[rd]).0
   } else {
-    gba.fetch_reg(rn).overflowing_mul(gba.fetch_reg(rm)).0
+    gba.regs[rn].overflowing_mul(gba.regs[rm]).0
   };
-  *gba.reg_mut(rs) = res;
+  gba.regs[rs] = res;
   if set_cond_flags {
     //C=destroyed (ARMv4 and below)
     gba.cpsr.set_all_status_flags(res, Some(false), None);
   }
-  gba.clocks += 0; // todo:clocks
+  let internal_cycles = 1
+    + if res & 0x0000_FF00 != 0 || res & 0x0000_FF00 == 0x0000_FF00 { 1 } else { 0 }
+    + if res & 0x00FF_0000 != 0 || res & 0x00FF_0000 == 0x00FF_0000 { 1 } else { 0 }
+    + if res & 0xFF00_0000 != 0 || res & 0xFF00_0000 == 0xFF00_0000 { 1 } else { 0 };
+  gba.clocks += gba.sequential_cycle()
+    + gba.internal_cycle() * (internal_cycles + if accumulate { 1 } else { 0 });
   Ok(())
 }
 /// Halfword Data Transfer Register Offset (HDT_RO or HDT_IO)
@@ -356,11 +368,13 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
   if !is_pre_offseted || write_back {
     gba.regs[rn] = addr;
   }
-  gba.clocks += 0; // todo:clocks
+  // TODO: Do clocks properly here
+  gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();
   Ok(())
 }
 /// Single Data Transfer (SDT)
 fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
+  gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();
   gba.debug_print_fn.map(|f| f("single_data_transfer"));
   let shifted_register = as_extra_flag(opcode);
   let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
@@ -450,7 +464,6 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   if !is_pre_offseted || bit_21 {
     gba.regs[rn] = addr;
   }
-  gba.clocks += 0; // todo:clocks
   Ok(())
 }
 /// Block Data Transfer (BDT)
@@ -497,12 +510,14 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   } else {
     |gba, reg, sp| gba.regs[reg] = gba.fetch_u32(sp)
   };
+  let mut n = 0;
   // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
   // So we use regular fors (For now)
   if is_pre_offseted {
     for (byte_number, byte) in rlists.iter().enumerate().rev() {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
         if bit_is_set {
+          n += 1;
           let bit_number = byte_number * 8 + bit_in_byte;
           offseting_operation(&mut sp, 4);
           push_or_pop_operation(gba, bit_number, sp);
@@ -513,6 +528,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
     for (byte_number, byte) in rlists.iter().enumerate() {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate() {
         if bit_is_set {
+          n += 1;
           let bit_number = byte_number * 8 + bit_in_byte;
           push_or_pop_operation(gba, bit_number, sp);
           offseting_operation(&mut sp, 4);
@@ -528,7 +544,18 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
       .get_spsr_mut()
       .ok_or("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode")?;
   }
-  gba.clocks += 0; // todo:clocks
+  gba.clocks += gba.nonsequential_cycle()
+    + if is_push {
+      gba.nonsequential_cycle() + (std::cmp::max(n, 1) - 1) * gba.sequential_cycle()
+    } else {
+      gba.internal_cycle()
+        + if opcode & 0x0000_0080 != 0 {
+          // LDM PC
+          gba.nonsequential_cycle() + (1 + n) * gba.sequential_cycle()
+        } else {
+          n * gba.sequential_cycle()
+        }
+    };
   Ok(())
 }
 /// Data Processing or PSR transfer
@@ -758,7 +785,11 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     }
     _ => unimplemented!("Impossible. We AND'ed 4 bits, there are 16 posibilities"),
   }
-  gba.clocks += 0; // todo:clocks
+  // See http://problemkaputt.de/gbatek.htm#armopcodesdataprocessingalu
+  // (1+p)S+rI+pN. Whereas r=1 if I=0 and R=1 (ie. shift by register); otherwise r=0. And p=1 if Rd=R15; otherwise p=0.
+  gba.clocks += gba.sequential_cycle()
+    + if !immediate && ((opcode & 0x0000_0010) != 0) { gba.internal_cycle() } else { 0 }
+    + if rd == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
   Ok(())
 }
 /// Move to Status Register (MSR)
@@ -802,6 +833,7 @@ fn move_to_status_register(gba: &mut GBA, opcode: u32) -> ARMResult {
       gba.cpsr = CPSR((gba.cpsr.0 & (!PRIVACY_MASK)) | (operand & PRIVACY_MASK));
     }
   };
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// Move to register from status register (MRS)
@@ -815,6 +847,7 @@ fn move_to_register_from_status_register(gba: &mut GBA, opcode: u32) -> ARMResul
   } else {
     gba.cpsr.0
   };
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// Coprocessor Data Transfer (CDT) (Unimplemented)
@@ -871,9 +904,9 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
 }
 
 pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ARMResult {
-  let pc = *gba.pc();
+  let pc = gba.regs[15];
   let opcode = gba.fetch_u32(pc);
-  *gba.pc() += 4;
+  gba.regs[15] += 4;
   (gba.instruction_hook_with_opcode)(gba, opcode);
   if check_cond(gba, opcode) {
     return Ok(());

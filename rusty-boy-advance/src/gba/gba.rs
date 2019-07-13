@@ -21,6 +21,20 @@ const ADDRESS_TOO_BIG_HANDLER: u32 = 0x0000_0014;
 const NORMAL_INTERRUPT_HANDLER: u32 = 0x0000_0018;
 const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 
+const VIDEO_HEIGHT: usize = 160;
+const VIDEO_WIDTH: usize = 240;
+
+// Numbers taken from https://rust-console.github.io/gba/io-registers.html#vcount-vertical-display-counter
+const NUM_VIRTUAL_HORIZONTAL_PIXELS: u16 = 68;
+const NUM_REAL_HORIZONTAL_PIXELS: u16 = VIDEO_WIDTH as u16;
+const NUM_HORIZONTAL_PIXELS: u16 = NUM_VIRTUAL_HORIZONTAL_PIXELS + NUM_REAL_HORIZONTAL_PIXELS;
+const CLOCKS_PER_PIXEL: u32 = 4;
+const CLOCKS_PER_SCANLINE: u32 = (NUM_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXEL;
+const NUM_VIRTUAL_SCANLINES: u16 = 68;
+const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
+const NUM_SCANLINES: u16 = NUM_REAL_SCANLINES + NUM_VIRTUAL_SCANLINES;
+const CLOCKS_PER_FRAME: u32 = (NUM_SCANLINES as u32) * CLOCKS_PER_SCANLINE;
+
 #[derive(PartialEq)]
 pub enum LogLevel {
   None,
@@ -55,7 +69,7 @@ impl std::error::Error for GBAError {
 }
 pub struct GBA {
   //// Output image
-  pub(crate) output_texture: [u8; 240 * 160 * 3],
+  pub(crate) output_texture: [u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
   /// Current registers. Swapped on mode change acordingly.
   pub(crate) regs: [u32; 16],
   /// FIQ-only banked registers.
@@ -108,7 +122,7 @@ impl GBA {
     };
     // Was still getting stack overflows without Box X
     let mut gba = box GBA {
-      output_texture: [0x00u8; 240 * 160 * 3],
+      output_texture: [0x00u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
       regs: [0u32; 16],
       fiq_only_banks: [[0u32; 5]; 2],
       all_modes_banks: [[0u32; 2]; 6],
@@ -185,19 +199,6 @@ impl GBA {
     self.regs[13] = self.all_modes_banks[new_idx][0];
     self.regs[14] = self.all_modes_banks[new_idx][1];
   }
-  pub(crate) fn pc(&mut self) -> &mut u32 {
-    self.reg_mut(15)
-  }
-  pub(crate) fn reg_mut(&mut self, reg: usize) -> &mut u32 {
-    match reg {
-      0..=16 => &mut self.regs[reg],
-      _ => unimplemented!("Unaccesible register {}", reg),
-    }
-  }
-  // TODO: Make this not take a &mut
-  pub(crate) fn fetch_reg(&mut self, reg: usize) -> u32 {
-    *self.reg_mut(reg)
-  }
   /// Max valid addressable value is 224Mb
   pub(crate) fn fetch_byte(&self, addr: u32) -> u8 {
     let addr = addr as usize;
@@ -248,6 +249,14 @@ impl GBA {
       // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width
       _ => 0u8, //  unimplemented!("Invalid address: {:x}", addr)
     }
+  }
+  pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
+    self.write_u8(addr, value as u8);
+    self.write_u8(addr + 1, (value >> 8) as u8);
+  }
+  pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
+    self.write_u16(addr, value as u16);
+    self.write_u16(addr + 2, (value >> 16) as u16);
   }
   /// The GBA GBA always runs in LE mode
   pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
@@ -311,23 +320,6 @@ impl GBA {
       _ => (), //unimplemented!("Invalid address: {:x}", addr),
     }
   }
-  pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
-    match addr {
-      // ROM out of bounds access (Behaviour taken from MGBA)
-      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      _ => u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16),
-    }
-  }
-  pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
-    self.write_u8(addr, value as u8);
-    self.write_u8(addr + 1, (value >> 8) as u8);
-  }
-  pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
-    self.write_u16(addr, value as u16);
-    self.write_u16(addr + 2, (value >> 16) as u16);
-  }
   pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
     match addr {
       // ROM out of bounds access (Behaviour taken from MGBA)
@@ -337,10 +329,19 @@ impl GBA {
       _ => u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8),
     }
   }
+  pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
+    match addr {
+      // ROM out of bounds access (Behaviour taken from MGBA)
+      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
+      _ => u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16),
+    }
+  }
   pub fn reset(&mut self) {
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
-    self.output_texture = [0x00u8; 240 * 160 * 3];
+    self.output_texture = [0x00u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
     self.fiq_only_banks = [[0u32; 5]; 2];
     self.all_modes_banks = [[0u32; 2]; 6];
     self.io_mem = [0u8; 1022];
@@ -353,9 +354,6 @@ impl GBA {
     self.wram_board = [0u8; 256 * KB];
     self.wram_chip = [0u8; 32 * KB];
     self.palette_ram = [0u8; KB];
-    for (idx, x) in self.palette_ram.iter_mut().enumerate() {
-      *x = (idx * 50) as u8;
-    }
     self.vram = [0u8; 96 * KB];
     self.oam = [0u8; KB];
     self.game_pak = box [0u8; 32 * MB];
@@ -364,7 +362,7 @@ impl GBA {
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
     self.regs[13] = 0x0300_7F00; // Taken from mgba
     self.regs[15] = RESET_HANDLER;
-    self.regs[15] = 0x0800_0000;
+    self.regs[15] = 0x0800_0000; //  To skip BIOS boot code
   }
   /// Load a ROM from a reader
   pub fn load(&mut self, rom_bytes: &[u8]) -> Result<(), Box<GBAError>> {
@@ -414,30 +412,39 @@ impl GBA {
     Ok(())
   }
   fn update_hvblank(&mut self) {
-    let column_offset = self.clocks % 1232;
-    let row_offset = (self.clocks / 1232) % 228;
+    let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
+    let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16) % NUM_SCANLINES;
 
-    let hblank = column_offset >= 960;
-    let vblank = row_offset >= 160;
+    let hblank = column_offset >= NUM_REAL_HORIZONTAL_PIXELS;
+    let vblank = row_offset >= NUM_REAL_SCANLINES;
 
     let prev_status = self.fetch_u16(0x0400_0004);
     //let prev_vcount = self.fetch_u16(0x0400_0006);
 
-    let new_status = (prev_status & 0b1111_1111_1111_1100)
+    let vcount_setting = (prev_status & 0xFF00) >> 8;
+    let vcounter_flag = vcount_setting == row_offset;
+
+    let new_status = (prev_status & 0b1111_1111_1111_1000)
+      | if vcounter_flag { 1 << 2 } else { 0 }
       | if hblank { 1 << 1 } else { 0 }
       | if vblank { 1 } else { 0 };
 
-    self.write_u16(0x0400_0006, (row_offset & 0xFF) as u16);
+    self.write_u16(0x0400_0006, row_offset & 0xFF);
     self.write_u16(0x0400_0004, new_status);
   }
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
-    // TODO: Make this actually run for 1 frame
-    for _ in 0..1000 {
+    //while self.clocks < CLOCKS_PER_FRAME {
+    for _ in 1..1000 {
       self.run_one_instruction()?;
     }
+    self.clocks -= CLOCKS_PER_FRAME;
     self.update_video_output();
     Ok(())
   }
+  /// Fills three bytes starting at the given index in the given slice with the RGB values of the given
+  /// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
+  /// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
+  #[inline]
   fn fill_output_color(output_texture: &mut [u8], idx: usize, color: u16) {
     let r = ((color & 0x001F) >> 0) as u8;
     let g = ((color & 0x03E0) >> 5) as u8;
@@ -446,13 +453,17 @@ impl GBA {
     output_texture[(idx * 3) + 1] = (std::cmp::max(g, 14) - 14).overflowing_mul(15).0;
     output_texture[(idx * 3) + 2] = (std::cmp::max(b, 14) - 14).overflowing_mul(15).0;
   }
+  /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
+  /// for details.
   fn update_video_output(&mut self) {
-    match self.io_mem[0] & 0x0000_0007 {
+    let bg_mode = self.io_mem[0] & 0x0000_0007;
+    match bg_mode {
       0 => (),
       1 => (),
       2 => (),
       3 => {
-        for (idx, slice) in self.vram.chunks_exact(2).take(240 * 160).enumerate() {
+        // 16 bit color bitmap. One frame buffer (240x160 pixels, 32768 colors)
+        for (idx, slice) in self.vram.chunks_exact(2).take(VIDEO_WIDTH * VIDEO_HEIGHT).enumerate() {
           if let &[high_byte, low_byte] = slice {
             let color = (low_byte as u16) + ((high_byte as u16) << 8);
             Self::fill_output_color(&mut self.output_texture[..], idx, color);
@@ -460,12 +471,13 @@ impl GBA {
         }
       }
       4 => {
+        // 8 bit palette indexed bitmap. Two frame buffers (240x160 pixels, 256 colors)
         let second_frame = (self.io_mem[0] & 0x0000_0008) != 0;
         for (idx, palette_idx) in self
           .vram
           .iter()
-          .skip(if second_frame { 240 * 160 } else { 0 })
-          .take(240 * 160)
+          .skip(if second_frame { VIDEO_WIDTH * VIDEO_HEIGHT } else { 0 })
+          .take(VIDEO_WIDTH * VIDEO_HEIGHT)
           .enumerate()
         {
           let palette_idx = (*palette_idx as usize) * 2;
@@ -474,7 +486,10 @@ impl GBA {
           Self::fill_output_color(&mut self.output_texture[..], idx, color);
         }
       }
-      5 => (),
+      5 => {
+        // 16 bit color bitmap. Two frame buffers (160x128 pixels, 32768 colors)
+        ()
+      }
       _ => (),
     }
   }
@@ -482,5 +497,17 @@ impl GBA {
     loop {
       self.run_one_frame()?;
     }
+  }
+  #[inline]
+  pub(crate) fn sequential_cycle(&self) -> u32 {
+    2
+  }
+  #[inline]
+  pub(crate) fn nonsequential_cycle(&self) -> u32 {
+    2
+  }
+  #[inline]
+  pub(crate) fn internal_cycle(&self) -> u32 {
+    1
   }
 }

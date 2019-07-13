@@ -85,7 +85,7 @@ fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
     },
     None,
   );
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// ADD/SUB
@@ -109,16 +109,9 @@ fn add_or_sub(gba: &mut GBA, opcode: u16) -> ThumbResult {
   } else {
     let (result, overflow) = first_operand.overflowing_add(second_operand);
     gba.cpsr.set_all_status_flags(result, Some(overflow), Some(false));
-    /*
-    gba.cpsr.set_all_status_flags_for_addition(
-      gba.regs[rd],
-      first_operand,
-      second_operand,
-      Some(overflow),
-    );*/
     result
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// Move, compare, add and substract immediate
@@ -135,7 +128,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       Some(offset <= rd_val),
       Some(((rd_val ^ offset) as i32) < 0 && ((offset ^ res) as i32) >= 0),
     );
-    gba.clocks += 0; // TODO: clocks
+    gba.clocks += gba.sequential_cycle();
     return Ok(());
   }
   gba.regs[rd] = match operation {
@@ -158,7 +151,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     _ => unreachable!(), // It's 2 bits
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
@@ -171,12 +164,14 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       let res = rd_val & rs_val;
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     0x1 => {
       //EOR/XOR
       let res = rd_val ^ rs_val;
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     0x2 => {
       //LSL (Logical Shift Left)
@@ -195,6 +190,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         if rs_val == 0 { None } else { Some(((rd_val >> (32 - rs_val)) & 1) != 0) },
         None,
       );
+      gba.clocks += gba.sequential_cycle() + gba.internal_cycle();
     }
     0x3 => {
       //LSR (Logical Shift Right)
@@ -206,6 +202,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         if rs_val == 0 { None } else { Some(((rd_val >> (rs_val - 1)) & 1) != 0) },
         None,
       );
+      gba.clocks += gba.sequential_cycle() + gba.internal_cycle();
     }
     0x4 => {
       //ASR (Arithmetic Shift Right)
@@ -217,6 +214,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         if rs_val == 0 { None } else { Some((rd_val >> (rs_val - 1)) & 1 != 0) },
         None,
       );
+      gba.clocks += gba.sequential_cycle() + gba.internal_cycle();
     }
     0x5 => {
       // ADC (Add With Carry)
@@ -232,6 +230,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         ),
         Some(overflow_when_adding_op2_and_carry || overflow),
       );
+      gba.clocks += gba.sequential_cycle();
     }
     0x6 => {
       // SBC (Substract With Carry)
@@ -248,6 +247,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
               && ((value_to_substract ^ result) as i32) >= 0),
         ),
       );
+      gba.clocks += gba.sequential_cycle();
     }
     0x7 => {
       // ROR (Rotate Right)
@@ -265,10 +265,12 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
           gba.cpsr.set_carry_flag((rd_val >> 31) != 0);
         }
       }
+      gba.clocks += gba.sequential_cycle() + gba.internal_cycle();
     }
     0x8 => {
       // TST (Test)
       gba.cpsr.set_all_status_flags(rd_val & rs_val, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     0x9 => {
       // NEG (Negate)
@@ -279,6 +281,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         Some(borrow_from(0, rs_val)),
         Some(((0 ^ rs_val) as i32) < 0 && ((rs_val ^ result) as i32) >= 0),
       );
+      gba.clocks += gba.sequential_cycle();
     }
     0xA => {
       // CMP (Compare)
@@ -288,39 +291,45 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
         Some(borrow_from(rd_val, rs_val)),
         Some(((rd_val ^ rs_val) as i32) < 0 && ((rs_val ^ res) as i32) >= 0),
       );
+      gba.clocks += gba.sequential_cycle();
     }
     0xB => {
       // CMN (Compare Negative)
       let (res, overflow) = rd_val.overflowing_add(rs_val);
       gba.cpsr.set_all_status_flags(res, Some(carry_from(rd_val, rs_val, res)), Some(overflow));
+      gba.clocks += gba.sequential_cycle();
     }
     0xC => {
       // ORR (Logical OR)
       let res = rd_val | rs_val;
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     0xD => {
       // MUL (Multiply)
       let res = rd_val.overflowing_mul(rs_val).0;
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, Some(false), None);
+      gba.clocks +=
+        gba.sequential_cycle() + (((res & 0xC000_0000) >> 30) + 1) * gba.internal_cycle();
     }
     0xE => {
       // BIC (Bit clear)
       let res = rd_val & (!rs_val);
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     0xF => {
       // MVN (Not)
       let res = !rs_val;
       gba.regs[rd] = res;
       gba.cpsr.set_all_status_flags(res, None, None);
+      gba.clocks += gba.sequential_cycle();
     }
     _ => unimplemented!("Impossible"),
   }
-  gba.clocks += 0; // TODO: clocks
   Ok(())
 }
 /// HiReg/BX
@@ -336,21 +345,25 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       // ADD
       let (res, _) = gba.regs[rd].overflowing_add(gba.regs[rs]);
       gba.regs[rd] = res;
+      gba.clocks += gba.sequential_cycle()
+        + if rs == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
     }
     1 => {
       //CMP
       let (op1, op2) = (gba.regs[rd], gba.regs[rs]);
       let (res, _overflow) = op1.overflowing_sub(op2);
-      // TODO: Is this check right?
       gba.cpsr.set_all_status_flags(
         res,
         Some(borrow_from(op1, op2)),
         Some(((op1 ^ op2) as i32) < 0 && ((op2 ^ res) as i32) >= 0),
       );
+      gba.clocks += gba.sequential_cycle();
     }
     2 => {
       // MOV
       gba.regs[rd] = if rs == 15 { gba.regs[15].overflowing_add(2).0 } else { gba.regs[rs] };
+      gba.clocks += gba.sequential_cycle()
+        + if rs == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
     }
     3 => {
       // Ignore BLX since it's ARMv9
@@ -363,10 +376,10 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       } else {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
       }
+      gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
     }
     _ => unreachable!(), // It's 2 bits
   }
-  gba.clocks += 0; // TODO: clocks
   Ok(())
 }
 /// LDR PC
@@ -376,16 +389,16 @@ fn pc_relative_load(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let offset = byte << 2; // In steps of 4
   gba.regs[rd] =
     gba.fetch_u32(((gba.regs[15].overflowing_add(2).0) & 0xFFFF_FFFC).overflowing_add(offset).0);
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();
   Ok(())
 }
 /// LDR/STR
 fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
-  let is_load = as_11th_bit(opcode);
+  let is_load_else_store = as_11th_bit(opcode);
   let is_byte_else_word = (opcode & 0x0400) != 0;
   let (addr, _) = gba.regs[ro].overflowing_add(gba.regs[rb]);
-  if is_load {
+  if is_load_else_store {
     gba.regs[rd] =
       if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else { gba.fetch_u32(addr) };
   } else {
@@ -395,7 +408,11 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
       gba.write_u32(addr, gba.regs[rd]);
     }
   }
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += if is_load_else_store {
+    gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
+  } else {
+    gba.nonsequential_cycle() + gba.nonsequential_cycle()
+  };
   Ok(())
 }
 /// LDR/STR H/SB/SH
@@ -407,8 +424,9 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
   let addr = gba.regs[rb].overflowing_add(gba.regs[ro]).0;
   gba.debug_print_fn.map(|f| f(format!("addr:{}\n", addr).as_str()));
   if !is_halfword && !sign_extend {
+    // Store 32bit data
     gba.write_u16(addr, gba.regs[rd] as u16);
-    gba.clocks += 0; // TODO: clocks
+    gba.clocks += gba.nonsequential_cycle() + gba.nonsequential_cycle();
     return Ok(());
   }
   gba.regs[rd] = if is_halfword {
@@ -422,7 +440,7 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
   } else {
     (i32::from(gba.fetch_byte(addr) as i8) as u32) // Sign extend
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();
   Ok(())
 }
 /// LDR/STR {B}
@@ -449,7 +467,11 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
       gba.write_u32(addr, gba.regs[rd]);
     }
   }
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += if is_load_else_store {
+    gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
+  } else {
+    gba.nonsequential_cycle() + gba.nonsequential_cycle()
+  };
   Ok(())
 }
 /// LDR/STR H
@@ -465,7 +487,11 @@ fn load_or_store_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
   } else {
     gba.write_u16(addr, gba.regs[rd] as u16);
   }
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += if is_load_else_store {
+    gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
+  } else {
+    gba.nonsequential_cycle() + gba.nonsequential_cycle()
+  };
   Ok(())
 }
 /// LDR/STR SP
@@ -480,7 +506,11 @@ fn stack_pointer_relative_load_or_store(gba: &mut GBA, opcode: u16) -> ThumbResu
   } else {
     gba.write_u32(addr, gba.regs[rd]);
   }
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += if is_load_else_store {
+    gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
+  } else {
+    gba.nonsequential_cycle() + gba.nonsequential_cycle()
+  };
   Ok(())
 }
 /// LOAD PC/SP
@@ -494,7 +524,7 @@ fn load_address(gba: &mut GBA, opcode: u16) -> ThumbResult {
   } else {
     (gba.regs[15].overflowing_add(2).0 & !3).overflowing_add(nn).0
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// ADD/SUB SP,nn
@@ -506,7 +536,7 @@ fn add_or_sub_offset_to_stack_pointer(gba: &mut GBA, opcode: u16) -> ThumbResult
   let sp = gba.regs[13];
   gba.regs[13] =
     if substract_else_add { sp.overflowing_sub(offset).0 } else { sp.overflowing_add(offset).0 };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 /// PUSH/POP
@@ -514,6 +544,7 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let is_pop_else_push = as_11th_bit(opcode);
   // PUSH LR or POP PC
   let pc_or_lr_flag = (opcode & 0x0100) != 0;
+  let mut n = 0;
   let rlist = as_low_byte(opcode);
   let mut sp = gba.regs[13];
   // GBATEK says "In THUMB mode stack is always meant to be 'full descending',
@@ -526,10 +557,12 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
     for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean) {
       gba.regs[idx] = gba.fetch_u32(sp);
       sp = sp.overflowing_add(4).0;
+      n += 1;
     }
     if pc_or_lr_flag {
       gba.regs[15] = gba.fetch_u32(sp) & (!0x0000_0001); // POP PC
       sp = sp.overflowing_add(4).0;
+      n += 1;
     }
   } else {
     if pc_or_lr_flag {
@@ -540,10 +573,20 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
     {
       sp = sp.overflowing_sub(4).0;
       gba.write_u32(sp, gba.regs[idx]);
+      n += 1;
     }
   }
+  gba.clocks += if is_pop_else_push {
+    (n * gba.sequential_cycle())
+      + gba.nonsequential_cycle()
+      + gba.internal_cycle()
+      + if pc_or_lr_flag { gba.nonsequential_cycle() } else { 0 }
+  } else {
+    ((std::cmp::max(n, 1) - 1) * gba.sequential_cycle())
+      + gba.nonsequential_cycle()
+      + gba.nonsequential_cycle()
+  };
   gba.regs[13] = sp;
-  gba.clocks += 0; // TODO: clocks
   Ok(())
 }
 /// STM/LDM
@@ -561,12 +604,20 @@ fn multiple_loads_or_stores(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.write_u32(addr, gba.regs[reg]);
     }
   };
+  let mut n = 0;
   for (idx, _) in rlist.as_bools().iter().rev().enumerate().filter(|(_, &boolean)| boolean) {
+    n += 1;
     operation(gba, addr, idx);
     addr = addr.overflowing_add(4).0;
   }
   gba.regs[rb] = addr;
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += if is_load_else_store {
+    n * gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
+  } else {
+    (std::cmp::max(n, 1) - 1) * gba.sequential_cycle()
+      + gba.nonsequential_cycle()
+      + gba.nonsequential_cycle()
+  };
   Ok(())
 }
 /// B{COND}
@@ -576,7 +627,6 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let cond = (opcode >> 8) & 0x000F;
   let should_not_jump = super::arm::check_cond(gba, u32::from(cond) << 28);
   if should_not_jump {
-    gba.clocks += 0; // TODO: clocks
     return Ok(());
   }
   gba.regs[15] = if is_negative {
@@ -584,13 +634,13 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   } else {
     gba.regs[15].overflowing_add(offset.overflowing_add(2).0).0
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// SWI
 fn software_interrupt(gba: &mut GBA, opcode: u16) -> ThumbResult {
   super::arm::software_interrupt(gba, u32::from(opcode) << 16)?;
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// B
@@ -604,7 +654,7 @@ fn branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   } else {
     pc.overflowing_add(absolute_offset).0.overflowing_add(2).0
   };
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 /// BL/BLX
@@ -616,7 +666,7 @@ fn branch_and_link_or_link_and_exchange_first_opcode(gba: &mut GBA, opcode: u16)
   let upper_offset = (i32::from((as_low_11bits(opcode) as i16) << 5) << 7) as u32;
   let pc = gba.regs[15];
   gba.regs[14] = pc.overflowing_add(upper_offset).0.overflowing_add(2).0;
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle();
   Ok(())
 }
 fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16) -> ThumbResult {
@@ -625,7 +675,7 @@ fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16
   let pc = gba.regs[15].overflowing_add(2).0;
   gba.regs[15] = gba.regs[14].overflowing_add(lower_offset).0;
   gba.regs[14] = pc.overflowing_sub(1).0;
-  gba.clocks += 0; // TODO: clocks
+  gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
 }
 fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
@@ -658,9 +708,9 @@ fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
 }
 
 pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ThumbResult {
-  let pc = *gba.pc();
+  let pc = gba.regs[15];
   let opcode = gba.fetch_u16(pc);
-  *gba.pc() = pc.overflowing_add(2).0;
+  gba.regs[15] = pc.overflowing_add(2).0;
   (gba.instruction_hook_with_opcode)(gba, u32::from(opcode));
   let instruction = decode_thumb(opcode)?;
   instruction(gba, opcode)?;
