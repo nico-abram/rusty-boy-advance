@@ -1,11 +1,29 @@
 use rusty_boy_advance::{GBABox, LogLevel};
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate stdweb;
 
 use quicksilver::{
   geom::Vector,
   graphics::{Background::Img, Color, Image, PixelFormat},
-  lifecycle::{Asset, Settings, State, Window},
+  lifecycle::{Settings, State, Window},
   Result,
 };
+
+fn polymorphic_print(x: &str) {
+  {
+    #[cfg(target_arch = "wasm32")]
+    {
+      js! {
+        console.log(@{x});
+      }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+      println!("{}", x);
+    }
+  }
+}
 
 struct GameState {
   gba: GBABox,
@@ -22,28 +40,30 @@ impl State for GameState {
       .gba
       .run_one_frame()
       .map_err(|_| quicksilver::Error::ContextError(String::from("Error running a GBA frame")))?;
-    let mut a = [0u8; 240 * 160 * 3];
-    for (idx, x) in self.gba.video_output().iter().enumerate() {
-      a[idx] = *x;
+    let mut rgba_formatted = [255u8; 255 * 160 * 4];
+    for (output, input) in rgba_formatted.chunks_mut(4).zip(self.gba.video_output().chunks(3)) {
+      for i in 0..3 {
+        output[i] = input[i];
+      }
     }
-    let img = Image::from_raw(&a[..], 240, 160, PixelFormat::RGB)?;
+    let img = Image::from_raw(&rgba_formatted[..], 240, 160, PixelFormat::RGBA)?;
+    // This doesnt work in the browser for some reason (But does on desktop)
+    // https://github.com/ryanisaacg/quicksilver/issues/512
+    //let img = Image::from_raw(self.gba.video_output(), 240, 160, PixelFormat::RGB)?;
     window.draw(&img.area(), Img(&img));
     Ok(())
   }
 }
-
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-  let mut gba = GBABox::new(LogLevel::None, None, Some(|x| print!("{}", x)));
-  let mut r = Asset::new(quicksilver::load_file("e.gba"));
-  r.execute(|rom_file| {
-    gba
-      .load(&rom_file[..])
-      .map_err(|_| quicksilver::Error::ContextError(String::from("Error loading ROM")))
-  })?;
+  let mut gba = GBABox::new(LogLevel::None, None, Some(polymorphic_print));
+  let rom_bytes = include_bytes!("armwrestler.gba");
+  gba
+    .load(rom_bytes)
+    .map_err(|_| quicksilver::Error::ContextError(String::from("Error loading ROM")))?;
   quicksilver::lifecycle::run_with(
     "Rusty Boy Advance Quicksilver",
     Vector::new(240, 160),
-    Settings::default(),
+    Settings { vsync: false, ..Settings::default() },
     || Ok(GameState { gba }),
   );
   Ok(())
