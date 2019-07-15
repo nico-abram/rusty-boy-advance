@@ -25,6 +25,9 @@ impl GBABox {
   ) -> Self {
     GBABox { internal_gba: gba::GBA::new(log_level, bios_file, print_fn) }
   }
+  pub fn update_video_output(&mut self) {
+    self.internal_gba.update_video_output()
+  }
   pub fn video_output(&self) -> &[u8] {
     &self.internal_gba.output_texture[..]
   }

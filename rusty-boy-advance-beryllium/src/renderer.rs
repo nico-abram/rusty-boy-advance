@@ -5,15 +5,15 @@ use rusty_boy_advance::GBABox;
 pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
   let sdl = unsafe { beryllium::init() }?;
-  let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT32_DEFAULT)?;
+  let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT24_DEFAULT)?;
   let pitch = surface.pitch() as usize;
 
   let window = sdl.create_window(
-    "RGBA",
+    "Rusty Boy Advance Beryllium",
     WINDOW_POSITION_CENTERED,
     WINDOW_POSITION_CENTERED,
-    800,
-    600,
+    240,
+    160,
     WindowFlags::default(),
   )?;
   let renderer = unsafe {
@@ -78,10 +78,10 @@ pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error
             // Note: pitch values are provided **in bytes**, so cast to the pixel
             // type after you offset to the start of the target row.
             let row_ptr = ptr.add(y * pitch) as *mut u8;
-            let idx = x * 160 + y * 3;
-            row_ptr.add(idx).write(output[idx]);
-            row_ptr.add(idx + 1).write(output[idx + 1]);
-            row_ptr.add(idx + 2).write(output[idx + 2]);
+            let idx = x * 3;
+            row_ptr.add(idx).write(output[y * 240 + idx + 2]);
+            row_ptr.add(idx + 1).write(output[y * 240 + idx + 1]);
+            row_ptr.add(idx + 2).write(output[y * 240 + idx + 0]);
           }
         }
       })?;

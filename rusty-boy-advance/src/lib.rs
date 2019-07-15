@@ -1,6 +1,5 @@
 #![feature(box_syntax)]
 #![feature(test)]
-#![feature(slice_concat_ext)]
 #![no_std]
 
 extern crate alloc;

@@ -1,16 +1,17 @@
+use capstone::prelude::*;
 use glium::{
   backend::Facade,
   texture::{ClientFormat, RawImage2d},
   Texture2d,
 };
-use imgui::{im_str, Condition, ImString};
+use imgui::{im_str, Condition, ImGuiSelectableFlags, ImString};
 use rusty_boy_advance::{GBABox, LogLevel};
 
 use std::{borrow::Cow, collections::VecDeque, io::Read};
 
 mod support;
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 enum BrowsableMemory {
   BIOS,
   ChipWRAM,
@@ -49,15 +50,21 @@ struct BrowsedMemory {
   mem: BrowsableMemory,
   chunk_size: usize,
   auto_update: bool,
-  contents: Vec<(ImString, String, u32, bool)>,
+  contents: Vec<(ImString, String, String, u32, bool)>,
   breakpoints: Vec<u32>,
   is_little_endian: bool,
   last_update: std::time::Instant,
 }
 fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory) {
   mem.contents.clear();
+  let disassembler = Capstone::new()
+    .arm()
+    .mode(if mem.chunk_size == 2 { arch::arm::ArchMode::Thumb } else { arch::arm::ArchMode::Arm })
+    .build()
+    .unwrap();
   for (chunk_idx, chunks) in get_memory(gba, mem.mem).chunks(mem.chunk_size).enumerate() {
     let addr = ((chunk_idx * mem.chunk_size) as u32) + offset(mem.mem);
+    let asm = disassembler.disasm_all(chunks, 0).unwrap();
     mem.contents.push((
       ImString::new(format!("{:08x}:", addr)),
       (if !mem.is_little_endian {
@@ -66,6 +73,11 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
         chunks.iter().map(|x| format!("{:02x}", x)).collect::<Vec<_>>()
       })
       .join(""),
+      asm
+        .iter()
+        .next()
+        .map(|x| format!("{} {}", x.mnemonic().unwrap_or("err"), x.op_str().unwrap_or("err")))
+        .unwrap_or_else(|| String::from("Error")),
       addr,
       mem.breakpoints.iter().any(|x| *x == addr),
     ));
@@ -96,7 +108,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   unsafe { GBA_LOGS = Some(RacyUnsafeCell::new(VecDeque::with_capacity(LOGS_SIZE))) };
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
-  let mut gba = GBABox::new(LogLevel::Debug, None, Some(push_log));
+  let mut gba = GBABox::new(LogLevel::None, None, Some(push_log));
   let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
     let raw = RawImage2d {
@@ -125,8 +137,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
   update_currently_browsed_memory_string(&gba, &mut browsed_memory);
   system.main_loop(|_opened, ui, renderer, _display, framerate| {
+    let mut scroll_memory_to_pc = false;
     if running {
-      if browsed_memory.breakpoints.len() == 0 {
+      if browsed_memory.breakpoints.is_empty() {
         gba.run_one_frame().unwrap();
       } else {
         for _ in 0..1000 {
@@ -186,6 +199,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           cpsr.mode()
         ));
         ui.set_column_offset(1, 80.0);
+        scroll_memory_to_pc = ui.small_button(im_str!("Goto PC"));
         ui.next_column();
         const REGISTER_NAMES: [&str; 16] = [
           "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
@@ -210,6 +224,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if !running {
           if ui.button(im_str!(" "), icon_size) {
             gba.run_one_instruction().unwrap();
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step");
@@ -217,6 +232,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for _ in 0..10 {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(10)");
@@ -224,6 +240,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for _ in 0..100 {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(100)");
@@ -231,6 +248,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for _ in 0..1000 {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(1000)");
@@ -238,13 +256,15 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for _ in 0..10000 {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(10000)");
           if ui.button(im_str!("#5"), icon_size) {
-            for _ in 0..100000 {
+            for _ in 0..100_000 {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(100000)");
@@ -252,6 +272,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             for _ in 0..variable_step {
               gba.run_one_instruction().unwrap();
             }
+            gba.update_video_output();
           }
           ui.same_line(0.0);
           ui.text("Step(");
@@ -359,7 +380,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.separator();
         ui.checkbox(im_str!("Auto Update"), &mut browsed_memory.auto_update);
         ui.separator();
-        ui.child_frame(im_str!("child frame"), [320.0, 400.0])
+        ui.child_frame(im_str!("child frame"), [400.0, 400.0])
           .show_borders(true)
           .always_show_vertical_scroll_bar(true)
           .build(|| {
@@ -368,15 +389,52 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               update_currently_browsed_memory_string(&gba, &mut browsed_memory);
               browsed_memory.last_update = std::time::Instant::now();
             }
-            ui.columns(2, im_str!("memory contents"), true);
-            ui.set_column_offset(1, 100.0);
+            ui.columns(4, im_str!("memory contents"), true);
+            ui.set_column_offset(1, 0.0);
+            ui.set_column_offset(2, 90.0);
+            ui.set_column_offset(3, 160.0);
+            ui.next_column();
             ui.text("Address");
             ui.next_column();
             ui.text("Value");
             ui.next_column();
+            ui.text("Assembly");
+            ui.next_column();
+            if scroll_memory_to_pc {
+              let pc = gba.registers()[15];
+              let region = match pc {
+                0..=0x01FF_FFFF => BrowsableMemory::BIOS,
+                0x0200_0000..=0x02FF_FFFF => BrowsableMemory::BoardWRAM,
+                0x0300_0000..=0x03FF_FFFF => BrowsableMemory::ChipWRAM,
+                0x0400_0000..=0x04FF_FFFF => BrowsableMemory::IO,
+                0x0500_0000..=0x05FF_FFFF => BrowsableMemory::Palette,
+                0x0600_0000..=0x06FF_FFFF => BrowsableMemory::VRAM,
+                0x0700_0000..=0x07FF_FFFF => BrowsableMemory::OAM,
+                _ => BrowsableMemory::ROM,
+              };
+              browsed_memory.mem = region;
+              update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+            }
             let (contents, breakpoints) =
               (&mut browsed_memory.contents, &mut browsed_memory.breakpoints);
-            for (addr_string, value, addr_u32, checkpoint_set) in contents {
+            let pc = gba.registers()[15];
+            let chunk_size = browsed_memory.chunk_size as u32;
+            for (addr_string, value, disassembly, addr_u32, checkpoint_set) in contents {
+              let this_line_is_current_pc = pc >= *addr_u32 && pc < (*addr_u32 + chunk_size);
+              if scroll_memory_to_pc && this_line_is_current_pc {
+                scroll_memory_to_pc = false;
+                unsafe { imgui_sys::igSetScrollHereY(0.0) };
+              }
+              if this_line_is_current_pc {
+                ui.selectable(
+                  im_str!("###1"),
+                  true,
+                  ImGuiSelectableFlags::SpanAllColumns,
+                  [400.0, 20.0],
+                );
+                ui.same_line(0.0);
+              }
+              ui.next_column();
               if ui.checkbox(addr_string, checkpoint_set) {
                 if *checkpoint_set {
                   breakpoints.push(*addr_u32);
@@ -386,6 +444,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               }
               ui.next_column();
               ui.text(value);
+              ui.next_column();
+              ui.text(disassembly);
               ui.next_column();
             }
           });
@@ -399,7 +459,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           ui.text(log_line);
         }
       });
-    //ui.show_demo_window(opened);
+    //ui.show_demo_window(_opened);
     //ui.show_metrics_window(opened);
   });
   Ok(())

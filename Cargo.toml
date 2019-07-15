@@ -6,3 +6,6 @@ members = [
     "rusty-boy-advance-quicksilver",
     "rusty-boy-advance-imgui",
 ]
+
+[profile.release]
+debug = true

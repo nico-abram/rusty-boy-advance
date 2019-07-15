@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use alloc::{boxed::Box, format, slice::SliceConcatExt, string::String, vec::Vec};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use super::{cpsr, cpu_mode, instructions, rom};
 use instructions::{arm, thumb};
@@ -433,8 +433,8 @@ impl GBA {
     self.write_u16(0x0400_0004, new_status);
   }
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
-    //while self.clocks < CLOCKS_PER_FRAME {
-    for _ in 1..1000 {
+    while self.clocks < CLOCKS_PER_FRAME {
+      //for _ in 1..1000 {
       self.run_one_instruction()?;
     }
     self.clocks -= CLOCKS_PER_FRAME;
@@ -455,7 +455,7 @@ impl GBA {
   }
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
-  fn update_video_output(&mut self) {
+  pub(crate) fn update_video_output(&mut self) {
     let bg_mode = self.io_mem[0] & 0x0000_0007;
     match bg_mode {
       0 => (),
