@@ -327,7 +327,7 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
         // Load Signed halfword (sign extended)
         gba.regs[rd] = gba.fetch_u16(addr) as i16 as i32 as u32;
       }
-      0 => std::panic!(
+      0 => core::panic!(
         "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
       ),
       _ => unreachable!(), // It's 2 bits
@@ -546,7 +546,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   }
   gba.clocks += gba.nonsequential_cycle()
     + if is_push {
-      gba.nonsequential_cycle() + (std::cmp::max(n, 1) - 1) * gba.sequential_cycle()
+      gba.nonsequential_cycle() + (core::cmp::max(n, 1) - 1) * gba.sequential_cycle()
     } else {
       gba.internal_cycle()
         + if opcode & 0x0000_0080 != 0 {

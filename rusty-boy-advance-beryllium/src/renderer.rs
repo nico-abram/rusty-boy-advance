@@ -81,6 +81,7 @@ pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error
             let idx = x * 3;
             row_ptr.add(idx).write(output[y * 240 + idx + 2]);
             row_ptr.add(idx + 1).write(output[y * 240 + idx + 1]);
+            #[allow(clippy::identity_op)]
             row_ptr.add(idx + 2).write(output[y * 240 + idx + 0]);
           }
         }

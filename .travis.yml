@@ -52,6 +52,7 @@ addons:
 script:
   - rustup default nightly
   - rustup target add $ARCH
+  - rustup update
   - cargo build --target=$ARCH
   - cargo test --target=$ARCH
   #test no-std

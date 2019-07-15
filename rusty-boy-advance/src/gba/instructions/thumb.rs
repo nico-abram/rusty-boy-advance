@@ -582,7 +582,7 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
       + gba.internal_cycle()
       + if pc_or_lr_flag { gba.nonsequential_cycle() } else { 0 }
   } else {
-    ((std::cmp::max(n, 1) - 1) * gba.sequential_cycle())
+    ((core::cmp::max(n, 1) - 1) * gba.sequential_cycle())
       + gba.nonsequential_cycle()
       + gba.nonsequential_cycle()
   };
@@ -614,7 +614,7 @@ fn multiple_loads_or_stores(gba: &mut GBA, opcode: u16) -> ThumbResult {
   gba.clocks += if is_load_else_store {
     n * gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
   } else {
-    (std::cmp::max(n, 1) - 1) * gba.sequential_cycle()
+    (core::cmp::max(n, 1) - 1) * gba.sequential_cycle()
       + gba.nonsequential_cycle()
       + gba.nonsequential_cycle()
   };

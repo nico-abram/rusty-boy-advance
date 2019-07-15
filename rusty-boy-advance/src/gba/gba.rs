@@ -449,9 +449,9 @@ impl GBA {
     let r = ((color & 0x001F) >> 0) as u8;
     let g = ((color & 0x03E0) >> 5) as u8;
     let b = ((color & 0xFC00) >> 10) as u8;
-    output_texture[(idx * 3) + 0] = (std::cmp::max(r, 14) - 14).overflowing_mul(15).0;
-    output_texture[(idx * 3) + 1] = (std::cmp::max(g, 14) - 14).overflowing_mul(15).0;
-    output_texture[(idx * 3) + 2] = (std::cmp::max(b, 14) - 14).overflowing_mul(15).0;
+    output_texture[(idx * 3) + 0] = (core::cmp::max(r, 14) - 14).overflowing_mul(15).0;
+    output_texture[(idx * 3) + 1] = (core::cmp::max(g, 14) - 14).overflowing_mul(15).0;
+    output_texture[(idx * 3) + 2] = (core::cmp::max(b, 14) - 14).overflowing_mul(15).0;
   }
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
