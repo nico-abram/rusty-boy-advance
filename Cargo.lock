@@ -160,11 +160,12 @@ dependencies = [
 
 [[package]]
 name = "beryllium"
-version = "0.0.13"
+version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "fermium 0.0.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)",
+ "objc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "phantom-fields 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -2036,7 +2037,7 @@ version = "0.0.4"
 name = "rusty-boy-advance-beryllium"
 version = "0.0.2"
 dependencies = [
- "beryllium 0.0.13 (registry+https://github.com/rust-lang/crates.io-index)",
+ "beryllium 0.0.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 3.0.0-beta.1 (git+https://github.com/clap-rs/clap?branch=v3-master)",
  "rusty-boy-advance 0.0.4",
 ]
@@ -2805,7 +2806,7 @@ dependencies = [
 "checksum backtrace-sys 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)" = "5b3a000b9c543553af61bc01cbfc403b04b5caa9e421033866f2e98061eb3e61"
 "checksum base-x 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)" = "76f4eae81729e69bb1819a26c6caac956cc429238388091f98cb6cd858f16443"
 "checksum base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0b25d992356d2eb0ed82172f5248873db5560c4721f564b13cb5193bda5e668e"
-"checksum beryllium 0.0.13 (registry+https://github.com/rust-lang/crates.io-index)" = "650711e36fb66e518bcadca36f76e4abfe31c42328a2d0f2cc3b7ea6c94503c7"
+"checksum beryllium 0.0.15 (registry+https://github.com/rust-lang/crates.io-index)" = "4dafd676ac2f54cdd480497fb94cd429fada3ba07512944f91e2f1b6dd6e9353"
 "checksum bindgen 0.32.3 (registry+https://github.com/rust-lang/crates.io-index)" = "8b242e11a8f446f5fc7b76b37e81d737cabca562a927bd33766dac55b5f1177f"
 "checksum bit-set 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e84c238982c4b1e1ee668d136c510c67a13465279c0cb367ea6baf6310620a80"
 "checksum bit-vec 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f59bbe95d4e52a6398ec21238d31577f2b28a9d86807f06ca59d191d8440d0bb"
