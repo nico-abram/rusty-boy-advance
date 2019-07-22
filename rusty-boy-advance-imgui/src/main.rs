@@ -423,7 +423,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               let this_line_is_current_pc = pc >= *addr_u32 && pc < (*addr_u32 + chunk_size);
               if scroll_memory_to_pc && this_line_is_current_pc {
                 scroll_memory_to_pc = false;
-                unsafe { imgui_sys::igSetScrollHereY(0.0) };
+                unsafe { imgui::sys::igSetScrollHereY(0.0) };
               }
               if this_line_is_current_pc {
                 ui.selectable(
