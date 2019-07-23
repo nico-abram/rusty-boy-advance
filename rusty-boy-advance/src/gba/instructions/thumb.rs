@@ -108,7 +108,7 @@ fn add_or_sub(gba: &mut GBA, opcode: u16) -> ThumbResult {
     result
   } else {
     let (result, overflow) = first_operand.overflowing_add(second_operand);
-    gba.cpsr.set_all_status_flags(result, Some(overflow), Some(false));
+    gba.cpsr.set_all_status_flags(result, Some(overflow), Some(!overflow));
     result
   };
   gba.clocks += gba.sequential_cycle();
@@ -177,7 +177,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       //LSL (Logical Shift Left)
       gba.debug_print_fn.map(|f| f("LSL\n"));
       let rs_val = rs_val & 0x00FF;
-      let (result, _) = rd_val.overflowing_shl(rs_val);
+      let result = rd_val << std::cmp::min(rs_val & 0x00FF, 32);
       gba.regs[rd] = result;
       gba.debug_print_fn.map(|f| f(format!("result:{:x}\n", result).as_str()));
       gba.debug_print_fn.map(|f| f(format!("rs_val:{:x}\n", rs_val).as_str()));
@@ -207,7 +207,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     0x4 => {
       //ASR (Arithmetic Shift Right)
       let rs_val = rs_val & 0x00FF;
-      let result = ((rd_val as i32) << rs_val) as u32;
+      let result = ((rd_val as i32) >> core::cmp::min(rs_val, 31)) as u32;
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,

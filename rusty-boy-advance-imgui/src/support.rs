@@ -70,7 +70,9 @@ pub fn init(title: &str) -> System {
 }
 
 impl System {
-  pub fn main_loop<F: FnMut(&mut bool, &mut Ui, &mut Renderer, &glium::Display, f32)>(
+  pub fn main_loop<
+    F: FnMut(&mut bool, &mut Ui, &mut Renderer, &glium::Display, f32, &Vec<Event>),
+  >(
     self,
     mut run_ui: F,
   ) {
@@ -81,22 +83,25 @@ impl System {
     let mut run = true;
 
     while run {
+      let mut events = Vec::with_capacity(64);
       events_loop.poll_events(|event| {
-        platform.handle_event(imgui.io_mut(), &window, &event);
+        events.push(event);
+      });
+      for event in &events {
+        platform.handle_event(imgui.io_mut(), &window, event);
 
         if let Event::WindowEvent { event, .. } = event {
           if let WindowEvent::CloseRequested = event {
             run = false;
           }
         }
-      });
-
+      }
       let io = imgui.io_mut();
       platform.prepare_frame(io, &window).expect("Failed to start frame");
       last_frame = io.update_delta_time(last_frame);
       let fps = io.framerate;
       let mut ui = imgui.frame();
-      run_ui(&mut run, &mut ui, &mut renderer, &display, fps);
+      run_ui(&mut run, &mut ui, &mut renderer, &display, fps, &events);
 
       let mut target = display.draw();
       target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);

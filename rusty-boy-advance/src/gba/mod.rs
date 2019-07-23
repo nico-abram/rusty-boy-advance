@@ -7,7 +7,7 @@ mod utils;
 
 pub use cpsr::CPSR;
 pub use cpu_mode::CpuMode;
-pub use gba::{GBAError, LogLevel, GBA};
+pub use gba::{GBAButton, GBAError, LogLevel, GBA};
 pub use rom::Rom;
 
 use alloc::boxed::Box;
@@ -33,6 +33,9 @@ impl GBABox {
   }
   pub fn io_memory(&self) -> &[u8] {
     &self.internal_gba.io_mem[..]
+  }
+  pub fn input(&mut self, button: GBAButton) {
+    GBA::input(self, button);
   }
   pub fn loaded_rom(&self) -> Option<&Rom> {
     self.internal_gba.loaded_rom.as_ref()

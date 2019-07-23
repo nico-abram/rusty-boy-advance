@@ -179,7 +179,9 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
 ///
 /// Used to call BIOS functions
 pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
+  let ret_pc = gba.regs[15];
   gba.set_mode(CpuMode::Supervisor);
+  gba.regs[14] = ret_pc;
   gba.regs[15] = SWI_HANDLER;
   gba.cpsr.set_thumb_state_flag(false); // Set ARM state
   gba.cpsr.set_irq_disabled_flag(true);
@@ -256,11 +258,11 @@ fn multiply(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, _, accumulate, set_cond_flags) = as_flags(opcode);
   let (rd, rn, rs, _, rm) = as_usize_nibbles(opcode);
   let res = if accumulate {
-    gba.regs[rn].overflowing_mul(gba.regs[rm]).0.overflowing_add(gba.regs[rd]).0
+    gba.regs[rs].overflowing_mul(gba.regs[rm]).0.overflowing_add(gba.regs[rn]).0
   } else {
-    gba.regs[rn].overflowing_mul(gba.regs[rm]).0
+    gba.regs[rs].overflowing_mul(gba.regs[rm]).0
   };
-  gba.regs[rs] = res;
+  gba.regs[rd] = res;
   if set_cond_flags {
     //C=destroyed (ARMv4 and below)
     gba.cpsr.set_all_status_flags(res, Some(false), None);
@@ -721,7 +723,11 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
       let (result, overflow) = rn.overflowing_sub(op2);
       let (result, overflow2) = result.overflowing_sub(1 - (cpsr.carry_flag() as u32));
       *res = result;
-      set_all_flags(*res, Some(op2 <= rn), Some(overflow || overflow2));
+      set_all_flags(
+        *res,
+        Some(op2 < rn || (cpsr.carry_flag() && op2 == rn)),
+        Some(overflow || overflow2),
+      );
     }
     7 => {
       //rsc
@@ -760,8 +766,8 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     }
     11 => {
       //cmn
-      let (res, v) = rn.overflowing_add(op2);
-      set_all_flags(res, Some(CPSR::addition_carries(res, rn, op2)), Some(v));
+      let (res, overflow) = rn.overflowing_add(op2);
+      set_all_flags(res, Some(CPSR::addition_carries(res, rn, op2)), Some(!overflow));
     }
     12 => {
       //or
@@ -811,7 +817,8 @@ fn move_to_status_register(gba: &mut GBA, opcode: u32) -> ARMResult {
   let current_mode = gba.cpsr.mode();
   if use_spsr {
     // If modifying the spsr we can directly modify it
-    let spsr = gba.get_spsr_mut().ok_or("")?;
+    let spsr =
+      gba.get_spsr_mut().ok_or("MSR with use_spsr in invalid mode (User or priviledged)")?;
     let old = spsr.0;
     let mut valid_bits_mask: u32 = (if change_control_fields { STATE_MASK } else { 0 })
       | (if change_flags_fields { FLAGS_MASK } else { 0 });

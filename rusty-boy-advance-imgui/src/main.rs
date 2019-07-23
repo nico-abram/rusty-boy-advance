@@ -1,11 +1,12 @@
 use capstone::prelude::*;
 use glium::{
   backend::Facade,
+  glutin::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode},
   texture::{ClientFormat, RawImage2d},
   Texture2d,
 };
 use imgui::{im_str, Condition, ImGuiSelectableFlags, ImString};
-use rusty_boy_advance::{GBABox, LogLevel};
+use rusty_boy_advance::{GBABox, GBAButton, LogLevel};
 
 use std::{borrow::Cow, collections::VecDeque, io::Read};
 
@@ -136,9 +137,32 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   };
 
   update_currently_browsed_memory_string(&gba, &mut browsed_memory);
-  system.main_loop(|_opened, ui, renderer, _display, framerate| {
+  system.main_loop(|_opened, ui, renderer, _display, framerate, events| {
     let mut scroll_memory_to_pc = false;
     if running {
+      if !ui.io().want_capture_keyboard {
+        for event in events {
+          if let Event::DeviceEvent {
+            event:
+              DeviceEvent::Key(KeyboardInput {
+                virtual_keycode: Some(key),
+                state: ElementState::Pressed,
+                ..
+              }),
+            ..
+          } = event
+          {
+            match key {
+              VirtualKeyCode::Return => gba.input(GBAButton::Start),
+              VirtualKeyCode::Left => gba.input(GBAButton::Left),
+              VirtualKeyCode::Up => gba.input(GBAButton::Up),
+              VirtualKeyCode::Down => gba.input(GBAButton::Down),
+              VirtualKeyCode::Right => gba.input(GBAButton::Right),
+              _ => (),
+            };
+          }
+        }
+      }
       if browsed_memory.breakpoints.is_empty() {
         gba.run_one_frame().unwrap();
       } else {

@@ -24,6 +24,8 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 const VIDEO_HEIGHT: usize = 160;
 const VIDEO_WIDTH: usize = 240;
 
+const KEY_STATUS_REG: u32 = 0x0400_0130;
+
 // Numbers taken from https://rust-console.github.io/gba/io-registers.html#vcount-vertical-display-counter
 const NUM_VIRTUAL_HORIZONTAL_PIXELS: u16 = 68;
 const NUM_REAL_HORIZONTAL_PIXELS: u16 = VIDEO_WIDTH as u16;
@@ -35,7 +37,20 @@ const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
 const NUM_SCANLINES: u16 = NUM_REAL_SCANLINES + NUM_VIRTUAL_SCANLINES;
 const CLOCKS_PER_FRAME: u32 = (NUM_SCANLINES as u32) * CLOCKS_PER_SCANLINE;
 
-#[derive(PartialEq)]
+#[derive(Debug)]
+pub enum GBAButton {
+  ButtonA,
+  ButtonB,
+  Select,
+  Start,
+  Right,
+  Left,
+  Up,
+  Down,
+  ButtonR,
+  ButtonL,
+}
+#[derive(PartialEq, Debug)]
 pub enum LogLevel {
   None,
   EveryInstruction,
@@ -148,7 +163,7 @@ impl GBA {
         LogLevel::EveryInstruction => print_opcode,
         LogLevel::None => nothing_with_opcode,
       },
-      print_fn: print_fn,
+      print_fn,
       debug_print_fn: if log_level == LogLevel::Debug { print_fn } else { None },
       executed_instructions_count: 0,
     };
@@ -220,7 +235,8 @@ impl GBA {
       // BG/OBJ Palette RAM        (1 Kbyte)
       0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000],
       // VRAM - Video RAM          (96 KBytes)
-      0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
+      //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
+      0x0600_0000..=0x06FF_FFFF => self.vram[addr & 0x0001_7FFF],
       // OAM - OBJ Attributes      (1 Kbyte)
       0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000],
       // External Memory (Game Pak)
@@ -411,6 +427,24 @@ impl GBA {
     self.update_hvblank();
     Ok(())
   }
+  pub fn input(&mut self, button: GBAButton) {
+    let val = self.fetch_u16(KEY_STATUS_REG);
+    let bit = match button {
+      GBAButton::ButtonA => 1,
+      GBAButton::ButtonB => 1 << 1,
+      GBAButton::Select => 1 << 2,
+      GBAButton::Start => 1 << 3,
+      GBAButton::Right => 1 << 4,
+      GBAButton::Left => 1 << 5,
+      GBAButton::Up => 1 << 6,
+      GBAButton::Down => 1 << 7,
+      GBAButton::ButtonR => 1 << 8,
+      GBAButton::ButtonL => 1 << 9,
+    };
+    self.print_fn.map(|x| x(format!("before: {} bit {}", val, bit).as_str()));
+    self.write_u16(KEY_STATUS_REG, val & !bit);
+    self.print_fn.map(|x| x(format!("after: {}", self.fetch_u16(KEY_STATUS_REG)).as_str()));
+  }
   fn update_hvblank(&mut self) {
     let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
     let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16) % NUM_SCANLINES;
@@ -439,6 +473,7 @@ impl GBA {
     }
     self.clocks -= CLOCKS_PER_FRAME;
     self.update_video_output();
+    self.write_u16(KEY_STATUS_REG, 0xFFFF);
     Ok(())
   }
   /// Fills three bytes starting at the given index in the given slice with the RGB values of the given

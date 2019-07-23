@@ -1,4 +1,4 @@
-use rusty_boy_advance::{GBABox, LogLevel};
+use rusty_boy_advance::{GBABox, GBAButton, LogLevel};
 #[cfg(target_arch = "wasm32")]
 #[macro_use]
 extern crate stdweb;
@@ -6,6 +6,7 @@ extern crate stdweb;
 use quicksilver::{
   geom::Vector,
   graphics::{Background::Img, Color, Image, PixelFormat},
+  input::{ButtonState, Key},
   lifecycle::{Settings, State, Window},
   Result,
 };
@@ -33,6 +34,28 @@ impl State for GameState {
   }
 
   fn draw(&mut self, window: &mut Window) -> Result<()> {
+    let kb = window.keyboard();
+    let gba = &mut self.gba;
+    if kb[Key::Left] == ButtonState::Pressed {
+      polymorphic_print("Left");
+      gba.input(GBAButton::Left);
+    }
+    if kb[Key::Right] == ButtonState::Pressed {
+      polymorphic_print("Right");
+      gba.input(GBAButton::Right);
+    }
+    if kb[Key::Up] == ButtonState::Pressed {
+      polymorphic_print("Up");
+      gba.input(GBAButton::Up);
+    }
+    if kb[Key::Down] == ButtonState::Pressed {
+      polymorphic_print("Down");
+      gba.input(GBAButton::Down);
+    }
+    if kb[Key::Return] == ButtonState::Pressed {
+      polymorphic_print("Return");
+      gba.input(GBAButton::Start);
+    }
     window.set_title(
       format!("Rusty Boy Advance Quicksilver ({:.2} FPS)", window.average_fps()).as_str(),
     );
