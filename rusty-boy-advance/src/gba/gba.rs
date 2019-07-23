@@ -37,7 +37,7 @@ const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
 const NUM_SCANLINES: u16 = NUM_REAL_SCANLINES + NUM_VIRTUAL_SCANLINES;
 const CLOCKS_PER_FRAME: u32 = (NUM_SCANLINES as u32) * CLOCKS_PER_SCANLINE;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum GBAButton {
   ButtonA,
   ButtonB,
@@ -49,6 +49,22 @@ pub enum GBAButton {
   Down,
   ButtonR,
   ButtonL,
+}
+impl GBAButton {
+  fn bit(self) -> u16 {
+    match self {
+      GBAButton::ButtonA => 1,
+      GBAButton::ButtonB => 1 << 1,
+      GBAButton::Select => 1 << 2,
+      GBAButton::Start => 1 << 3,
+      GBAButton::Right => 1 << 4,
+      GBAButton::Left => 1 << 5,
+      GBAButton::Up => 1 << 6,
+      GBAButton::Down => 1 << 7,
+      GBAButton::ButtonR => 1 << 8,
+      GBAButton::ButtonL => 1 << 9,
+    }
+  }
 }
 #[derive(PartialEq, Debug)]
 pub enum LogLevel {
@@ -118,6 +134,7 @@ pub struct GBA {
   pub(crate) print_fn: Option<fn(&str) -> ()>,
   pub(crate) debug_print_fn: Option<fn(&str) -> ()>,
   pub(crate) executed_instructions_count: u64,
+  persistent_input_bitmask: u16,
 }
 impl GBA {
   pub(crate) fn new(
@@ -166,6 +183,7 @@ impl GBA {
       print_fn,
       debug_print_fn: if log_level == LogLevel::Debug { print_fn } else { None },
       executed_instructions_count: 0,
+      persistent_input_bitmask: 0x000,
     };
     gba.reset();
     //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
@@ -429,21 +447,15 @@ impl GBA {
   }
   pub fn input(&mut self, button: GBAButton) {
     let val = self.fetch_u16(KEY_STATUS_REG);
-    let bit = match button {
-      GBAButton::ButtonA => 1,
-      GBAButton::ButtonB => 1 << 1,
-      GBAButton::Select => 1 << 2,
-      GBAButton::Start => 1 << 3,
-      GBAButton::Right => 1 << 4,
-      GBAButton::Left => 1 << 5,
-      GBAButton::Up => 1 << 6,
-      GBAButton::Down => 1 << 7,
-      GBAButton::ButtonR => 1 << 8,
-      GBAButton::ButtonL => 1 << 9,
-    };
-    self.print_fn.map(|x| x(format!("before: {} bit {}", val, bit).as_str()));
+    let bit = button.bit();
     self.write_u16(KEY_STATUS_REG, val & !bit);
-    self.print_fn.map(|x| x(format!("after: {}", self.fetch_u16(KEY_STATUS_REG)).as_str()));
+  }
+  pub fn persistent_input_pressed(&mut self, button: GBAButton) {
+    self.input(button);
+    self.persistent_input_bitmask |= button.bit();
+  }
+  pub fn persistent_input_released(&mut self, button: GBAButton) {
+    self.persistent_input_bitmask &= !button.bit();
   }
   fn update_hvblank(&mut self) {
     let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
@@ -473,7 +485,7 @@ impl GBA {
     }
     self.clocks -= CLOCKS_PER_FRAME;
     self.update_video_output();
-    self.write_u16(KEY_STATUS_REG, 0xFFFF);
+    self.write_u16(KEY_STATUS_REG, !self.persistent_input_bitmask);
     Ok(())
   }
   /// Fills three bytes starting at the given index in the given slice with the RGB values of the given

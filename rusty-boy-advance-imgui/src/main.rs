@@ -143,21 +143,21 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       if !ui.io().want_capture_keyboard {
         for event in events {
           if let Event::DeviceEvent {
-            event:
-              DeviceEvent::Key(KeyboardInput {
-                virtual_keycode: Some(key),
-                state: ElementState::Pressed,
-                ..
-              }),
+            event: DeviceEvent::Key(KeyboardInput { virtual_keycode: Some(key), state, .. }),
             ..
           } = event
           {
+            let input_f = if *state == ElementState::Pressed {
+              GBABox::persistent_input_pressed
+            } else {
+              GBABox::persistent_input_released
+            };
             match key {
-              VirtualKeyCode::Return => gba.input(GBAButton::Start),
-              VirtualKeyCode::Left => gba.input(GBAButton::Left),
-              VirtualKeyCode::Up => gba.input(GBAButton::Up),
-              VirtualKeyCode::Down => gba.input(GBAButton::Down),
-              VirtualKeyCode::Right => gba.input(GBAButton::Right),
+              VirtualKeyCode::Return => input_f(&mut gba, GBAButton::Start),
+              VirtualKeyCode::Left => input_f(&mut gba, GBAButton::Left),
+              VirtualKeyCode::Up => input_f(&mut gba, GBAButton::Up),
+              VirtualKeyCode::Down => input_f(&mut gba, GBAButton::Down),
+              VirtualKeyCode::Right => input_f(&mut gba, GBAButton::Right),
               _ => (),
             };
           }

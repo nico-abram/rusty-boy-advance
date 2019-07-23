@@ -6,7 +6,7 @@ extern crate stdweb;
 use quicksilver::{
   geom::Vector,
   graphics::{Background::Img, Color, Image, PixelFormat},
-  input::{ButtonState, Key},
+  input::Key,
   lifecycle::{Settings, State, Window},
   Result,
 };
@@ -36,24 +36,19 @@ impl State for GameState {
   fn draw(&mut self, window: &mut Window) -> Result<()> {
     let kb = window.keyboard();
     let gba = &mut self.gba;
-    if kb[Key::Left] == ButtonState::Pressed {
-      polymorphic_print("Left");
+    if kb[Key::Left].is_down() {
       gba.input(GBAButton::Left);
     }
-    if kb[Key::Right] == ButtonState::Pressed {
-      polymorphic_print("Right");
+    if kb[Key::Right].is_down() {
       gba.input(GBAButton::Right);
     }
-    if kb[Key::Up] == ButtonState::Pressed {
-      polymorphic_print("Up");
+    if kb[Key::Up].is_down() {
       gba.input(GBAButton::Up);
     }
-    if kb[Key::Down] == ButtonState::Pressed {
-      polymorphic_print("Down");
+    if kb[Key::Down].is_down() {
       gba.input(GBAButton::Down);
     }
-    if kb[Key::Return] == ButtonState::Pressed {
-      polymorphic_print("Return");
+    if kb[Key::Return].is_down() {
       gba.input(GBAButton::Start);
     }
     window.set_title(

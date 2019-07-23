@@ -34,15 +34,26 @@ impl GBABox {
   pub fn io_memory(&self) -> &[u8] {
     &self.internal_gba.io_mem[..]
   }
-  pub fn input(&mut self, button: GBAButton) {
+  /// This registers a button only for the next frame
+  pub fn single_input_is_down(&mut self, button: GBAButton) {
     GBA::input(self, button);
   }
+  /// This registers a button as pressed until persistent_input_released is called
+  pub fn persistent_input_pressed(&mut self, button: GBAButton) {
+    GBA::persistent_input_pressed(self, button);
+  }
+  /// This unregisters a button as pressed
+  pub fn persistent_input_released(&mut self, button: GBAButton) {
+    GBA::persistent_input_released(self, button);
+  }
+  /// Gets the loaded Rom. Returns None if no Rom is loaded
   pub fn loaded_rom(&self) -> Option<&Rom> {
     self.internal_gba.loaded_rom.as_ref()
   }
   pub fn registers(&self) -> [u32; 16] {
     self.regs
   }
+  /// Get the current Program Status Register
   pub fn cpsr(&self) -> CPSR {
     self.cpsr
   }
