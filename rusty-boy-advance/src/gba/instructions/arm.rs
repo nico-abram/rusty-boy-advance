@@ -221,16 +221,26 @@ fn multiply_long(gba: &mut GBA, opcode: u32) -> ARMResult {
     ));
   }
   let mut res: u64 = if signed {
-    (i64::from(gba.regs[rs]) * i64::from(gba.regs[rm])) as u64
+    (i64::from(gba.regs[rs] as i32) * i64::from(gba.regs[rm] as i32)) as u64
   } else {
     u64::from(gba.regs[rs]) * u64::from(gba.regs[rm])
   };
   if accumulate {
-    res += if store_double_word_result {
-      gba.regs[rdhigh_aka_rd] as u64
+    if store_double_word_result {
+      let val = u64::from(gba.regs[rdlow_aka_rn]) + (u64::from(gba.regs[rdhigh_aka_rd]) << 32);
+      if signed {
+        res = ((res as i64) + (val as i64)) as u64;
+      } else {
+        res += val;
+      }
     } else {
-      gba.regs[rdlow_aka_rn] as u64 + ((gba.regs[rdhigh_aka_rd] as u64) << 32)
-    };
+      let val = gba.regs[rdhigh_aka_rd];
+      if signed {
+        res = ((res as i64) + i64::from(val as i32)) as u64;
+      } else {
+        res += u64::from(val);
+      }
+    }
   }
   if store_double_word_result {
     gba.regs[rdlow_aka_rn] = (res) as u32;
@@ -705,7 +715,11 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
       //add
       let (result, overflow) = op2.overflowing_add(rn);
       *res = result;
-      set_all_flags(result, Some(CPSR::addition_carries(result, op2, rn)), Some(overflow));
+      set_all_flags(
+        result,
+        Some(CPSR::addition_carries(result, op2, rn)),
+        Some(((!(rn ^ result)) & rn ^ result) & 0x8000_0000 != 0),
+      );
     }
     5 => {
       //adc
@@ -715,7 +729,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
       set_all_flags(
         result,
         Some(CPSR::addition_carries(result, op2, rn)),
-        Some(overflow || overflow2),
+        Some(overflow || overflow2), // TODO: This is probably wrong
       );
     }
     6 => {
