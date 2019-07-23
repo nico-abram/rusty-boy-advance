@@ -5,7 +5,6 @@ rust:
 cache:
   - apt
   - homebrew
-  - cargo
 
 matrix:
   include:
