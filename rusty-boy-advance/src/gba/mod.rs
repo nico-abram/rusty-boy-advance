@@ -38,6 +38,9 @@ impl GBABox {
   pub fn single_input_is_down(&mut self, button: GBAButton) {
     GBA::input(self, button);
   }
+  pub fn set_log_level(&mut self, lvl: LogLevel) {
+    GBA::set_log_level(self, lvl);
+  }
   /// This registers a button as pressed until persistent_input_released is called
   pub fn persistent_input_pressed(&mut self, button: GBAButton) {
     GBA::persistent_input_pressed(self, button);

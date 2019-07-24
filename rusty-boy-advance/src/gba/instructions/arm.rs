@@ -939,7 +939,7 @@ pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ARMResult {
   let pc = gba.regs[15];
   let opcode = gba.fetch_u32(pc);
   gba.regs[15] += 4;
-  (gba.instruction_hook_with_opcode)(gba, opcode);
+  gba.instruction_hook_with_opcode.map(|f| f(gba, opcode));
   if check_cond(gba, opcode) {
     return Ok(());
   }

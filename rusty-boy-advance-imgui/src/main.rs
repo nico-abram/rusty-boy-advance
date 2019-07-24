@@ -109,7 +109,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   unsafe { GBA_LOGS = Some(RacyUnsafeCell::new(VecDeque::with_capacity(LOGS_SIZE))) };
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
-  let mut gba = GBABox::new(LogLevel::None, None, Some(push_log));
+  let mut log_level = LogLevel::None;
+  let mut gba = GBABox::new(log_level, None, Some(push_log));
   let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
     let raw = RawImage2d {
@@ -223,7 +224,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           cpsr.mode()
         ));
         ui.set_column_offset(1, 80.0);
-        scroll_memory_to_pc = ui.small_button(im_str!("Goto PC"));
         ui.next_column();
         const REGISTER_NAMES: [&str; 16] = [
           "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
@@ -304,6 +304,21 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           let _pushed_width = ui.push_item_width(120.0);
           ui.input_int(im_str!(")##7"), &mut variable_step).step(0).build();
         }
+        ui.separator();
+        ui.text("Log Level");
+        if ui.radio_button(im_str!("None"), &mut log_level, LogLevel::None) {
+          gba.set_log_level(log_level);
+        }
+        ui.same_line(0.0);
+        if ui.radio_button(im_str!("Medium"), &mut log_level, LogLevel::EveryInstruction) {
+          gba.set_log_level(log_level);
+        }
+        ui.same_line(0.0);
+        if ui.radio_button(im_str!("Debug"), &mut log_level, LogLevel::Debug) {
+          gba.set_log_level(log_level);
+        }
+        ui.separator();
+        scroll_memory_to_pc = ui.small_button(im_str!("Goto PC"));
       });
     ui.window(im_str!("ROM Loading"))
       .position([210.0, 0.0], Condition::Appearing)

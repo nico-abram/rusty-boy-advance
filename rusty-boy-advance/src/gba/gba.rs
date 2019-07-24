@@ -66,7 +66,7 @@ impl GBAButton {
     }
   }
 }
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum LogLevel {
   None,
   EveryInstruction,
@@ -128,8 +128,8 @@ pub struct GBA {
   pub(crate) oam: [u8; KB],
   pub(crate) io_mem: [u8; 1022],
   pub(crate) clocks: u32,
-  instruction_hook: fn(&mut GBA),
-  pub(crate) instruction_hook_with_opcode: fn(&mut GBA, u32),
+  instruction_hook: Option<fn(&mut GBA)>,
+  pub(crate) instruction_hook_with_opcode: Option<fn(&mut GBA, u32)>,
   pub(crate) loaded_rom: Option<Rom>,
   pub(crate) print_fn: Option<fn(&str) -> ()>,
   pub(crate) debug_print_fn: Option<fn(&str) -> ()>,
@@ -171,17 +171,10 @@ impl GBA {
       game_pak_sram: [0u8; 64 * KB],
       clocks: 0u32,
       loaded_rom: None,
-      instruction_hook: match log_level {
-        LogLevel::Debug | LogLevel::EveryInstruction => print_state,
-        LogLevel::None => nothing,
-      },
-      instruction_hook_with_opcode: match log_level {
-        LogLevel::Debug => print_opcode,
-        LogLevel::EveryInstruction => print_opcode,
-        LogLevel::None => nothing_with_opcode,
-      },
+      instruction_hook: None,
+      instruction_hook_with_opcode: None,
+      debug_print_fn: None,
       print_fn,
-      debug_print_fn: if log_level == LogLevel::Debug { print_fn } else { None },
       executed_instructions_count: 0,
       persistent_input_bitmask: 0x000,
     };
@@ -189,7 +182,28 @@ impl GBA {
     //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     gba.bios_rom.clone_from_slice(bios_file);
+    gba.set_log_level(log_level);
     gba
+  }
+  pub(crate) fn set_log_level(&mut self, log_level: LogLevel) {
+    let print_opcode = |gba: &mut GBA, opcode: u32| {
+      gba
+        .print_fn
+        .map(|f| f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str()));
+    };
+    let print_state = |gba: &mut GBA| {
+      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
+    };
+    self.instruction_hook = match log_level {
+      LogLevel::Debug | LogLevel::EveryInstruction => Some(print_state),
+      LogLevel::None => None,
+    };
+    self.instruction_hook_with_opcode = match log_level {
+      LogLevel::Debug => Some(print_opcode),
+      LogLevel::EveryInstruction => Some(print_opcode),
+      LogLevel::None => None,
+    };
+    self.debug_print_fn = if log_level == LogLevel::Debug { self.print_fn } else { None };
   }
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
     let mode = self.cpsr.mode();
@@ -435,7 +449,7 @@ impl GBA {
     )
   }
   pub fn run_one_instruction(&mut self) -> Result<(), GBAError> {
-    (self.instruction_hook)(self);
+    self.instruction_hook.map(|f| f(self));
     if self.thumb() {
       thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;
     } else {

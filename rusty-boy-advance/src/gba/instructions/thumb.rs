@@ -711,7 +711,7 @@ pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ThumbResult {
   let pc = gba.regs[15];
   let opcode = gba.fetch_u16(pc);
   gba.regs[15] = pc.overflowing_add(2).0;
-  (gba.instruction_hook_with_opcode)(gba, u32::from(opcode));
+  gba.instruction_hook_with_opcode.map(|f| f(gba, u32::from(opcode)));
   let instruction = decode_thumb(opcode)?;
   instruction(gba, opcode)?;
   Ok(())
