@@ -192,17 +192,20 @@ pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
 fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (_, _, is_byte_else_word, _, _) = as_flags(opcode);
   let (rn, rd, _, _, rm) = as_usize_nibbles(opcode);
+  // TODO: Does fetching address early work if rn = rm or rn = rd?
+  let addr = gba.regs[rn];
+  let val = gba.regs[rm];
   if is_byte_else_word {
     // TODO: Is this right? GBATEK mentions zero extending
     // But is it the most significant LE byte?
     // It refers to STR/LDR, which says
     // "When reading a byte from memory, upper 24 bits of Rd are zero-extended."
     // I'm assuming that literally means the upper bits and not the most significant ones
-    gba.regs[rd] = gba.regs[rn] & 0x0000_00FF;
-    gba.regs[rn] = gba.regs[rm] & 0x0000_00FF;
+    gba.regs[rd] = u32::from(gba.fetch_byte(addr));
+    gba.write_u8(addr, val as u8);
   } else {
-    gba.regs[rd] = gba.regs[rn];
-    gba.regs[rn] = gba.regs[rm];
+    gba.regs[rd] = gba.fetch_u32(addr);
+    gba.write_u32(addr, val);
   }
   gba.clocks += gba.sequential_cycle()
     + gba.nonsequential_cycle()
@@ -604,6 +607,12 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     let shift_by_register = (opcode & 0x0000_0010) != 0;
     let mut imm_shift_zero = false;
     let shift_amount = if shift_by_register {
+      if lowest_byte == 15 {
+        register_value += 4;
+      }
+      if rn_num == 15 {
+        rn = rn.overflowing_add(4).0; // Account for PC+12 if I=0,R=1 (shift by register)
+      }
       gba.debug_print_fn.map(|f| f(format!("shift by register n :{}\n", third_byte).as_str()));
       (gba.regs[third_byte as usize] & 0x0000_00FF)
         .overflowing_add(if third_byte == 15 { 4 } else { 0 })
@@ -632,6 +641,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
         _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
       }
     } else {
+      let shift_amount = core::cmp::min(shift_amount, 31);
       gba.debug_print_fn.map(|f| f(format!("shift_type:{}\n", shift_type).as_str()));
       match shift_type {
         0 => (
@@ -650,14 +660,14 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
             None
           },
         ),
-        2 => (
-          (register_value as i32).overflowing_shr(shift_amount).0 as u32,
-          if shift_amount != 0 {
-            Some(((register_value >> (core::cmp::max(shift_amount, 32) - 1)) & 1) != 0)
-          } else {
-            None
-          },
-        ),
+        2 => {
+          gba.debug_print_fn.map(|f| f(format!("register_value:{:x}\n", register_value).as_str()));
+          gba.debug_print_fn.map(|f| f(format!("shift_amount:{:x}\n", shift_amount).as_str()));
+          (
+            (register_value as i32).overflowing_shr(shift_amount).0 as u32,
+            if shift_amount != 0 { Some(((register_value >> 31) & 1) != 0) } else { None },
+          )
+        }
         3 => (
           register_value.rotate_right(shift_amount),
           if shift_amount != 0 {
@@ -672,6 +682,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     (op2, if shift_by_register && third_byte == 0 { None } else { shift_carry })
   };
   gba.debug_print_fn.map(|f| f(format!("op2:{}\n", op2).as_str()));
+  gba.debug_print_fn.map(|f| f(format!("op2 hex:{:x}\n", op2).as_str()));
   let res = &mut gba.regs[rd];
   let cpsr = gba.cpsr;
   let ref_cpsr = &mut gba.cpsr;
