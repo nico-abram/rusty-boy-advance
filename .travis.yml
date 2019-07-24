@@ -75,6 +75,7 @@ deploy:
     condition: $DO_DEPLOY = yes
 
 before_deploy:
+  - cargo install cargo-web
   - cargo web deploy -p rusty-boy-advance-quicksilver --release
   - cargo doc --document-private-items --no-deps
   - mkdir public
