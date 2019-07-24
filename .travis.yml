@@ -20,6 +20,8 @@ matrix:
       os: osx
     - env: ARCH=i686-apple-darwin
       os: osx
+    - env: wasm
+      os: linux
   #fermium doesn't fully work on 32bit targets at the moment
   allow_failures:
     - env: ARCH=i686-apple-darwin
@@ -50,16 +52,16 @@ addons:
 
 script:
   - rustup default nightly
-  - rustup target add $ARCH
   - rustup update
-  - cargo build --target=$ARCH
-  - cargo test --target=$ARCH
-  #test no-std
-  - cargo test --target=$ARCH --lib rusty-boy-advance --no-default-features
-  - cargo bench --target=$ARCH
   - |
-    if [ $ARCH == "x86_64-unknown-linux-gnu" ]; then
+    if [ $ARCH == "wasm" ]; then
       export DO_DEPLOY="yes";
+    else
+      rustup target add $ARCH;
+      cargo build --target=$ARCH;
+      cargo test --target=$ARCH;
+      cargo test --target=$ARCH --lib rusty-boy-advance --no-default-features;
+      cargo bench --target=$ARCH;
     fi
 
 deploy:
@@ -73,9 +75,10 @@ deploy:
     condition: $DO_DEPLOY = yes
 
 before_deploy:
+  - cargo web deploy -p rusty-boy-advance-quicksilver --release
   - cargo doc --document-private-items --no-deps
   - mkdir public
   - cp -r target/doc public/
+  - cp -r target/deploy public/
   - pwd
   - ls
-  - echo "<meta http-equiv=refresh content=0;url=doc/rusty_boy_advance/index.html>" > public/index.html
