@@ -20,7 +20,7 @@ matrix:
       os: osx
     - env: ARCH=i686-apple-darwin
       os: osx
-    - env: wasm
+    - env: ARCH=wasm
       os: linux
   #fermium doesn't fully work on 32bit targets at the moment
   allow_failures:
