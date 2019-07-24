@@ -79,7 +79,7 @@ before_deploy:
   - cargo web deploy -p rusty-boy-advance-quicksilver --release
   - cargo doc --document-private-items --no-deps
   - mkdir public
-  - cp -r target/doc public/
-  - cp -r target/deploy public/
+  - cp -r target/doc/. public/
+  - cp -r target/deploy/. public/
   - pwd
   - ls
