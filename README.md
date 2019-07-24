@@ -8,7 +8,7 @@ An attempt at a Game Boy Advance emulator in rust (Very much a WIP).
 
 # Progress
 
-I've only been working on the cpu so far. Almost all instructions are implemented (Except the coprocessor instructions, which aren't used in the GBA), sans bugs/errors. It can execute about 590500 (Not the first N instructions of the code, I mean executed instructions, so a loop would execute the same ones many times) instructions of the bios startup code correctly before going awry (Comparing the contents of all registers against mgba's after every instruction executed). I've also worked a bit on an ImGui front end that has a little memory viewer, a cpu state viewer and lets one set breakpoints at a given instruction (Although it doesn't have a disassembler, at least yet).
+I've only been working on the cpu so far. Almost all instructions are implemented (Except the coprocessor instructions, which aren't used in the GBA), sans bugs/errors. It can execute about 590500 (Not the first N instructions of the code, I mean executed instructions, so a loop would execute the same ones many times) instructions of the bios startup code correctly before going awry (Comparing the contents of all registers against mgba's after every instruction executed) and run the armwrestler test rom (Although it doesn't pass all the tests). I've also worked a bit on an ImGui front end that has a little memory viewer, a cpu state viewer and lets one set breakpoints at a given instruction (Although it doesn't have a disassembler, at least yet) and a web one using the quicksilver crate available at https://nico-abram.github.io/rusty-boy-advance/.
 
 # Useful references/tools
 
