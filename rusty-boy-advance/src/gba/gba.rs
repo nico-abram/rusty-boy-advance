@@ -478,6 +478,15 @@ impl GBA {
     let hblank = column_offset >= NUM_REAL_HORIZONTAL_PIXELS;
     let vblank = row_offset >= NUM_REAL_SCANLINES;
 
+    const HBLANK_IE_BIT: u32 = 1;
+    const VBLANK_IE_BIT: u32 = 0;
+    if column_offset == NUM_HORIZONTAL_PIXELS {
+      self.trigger_interrupt_if_enabled(HBLANK_IE_BIT);
+    }
+    if row_offset == NUM_REAL_SCANLINES {
+      self.trigger_interrupt_if_enabled(VBLANK_IE_BIT);
+    }
+
     let prev_status = self.fetch_u16(0x0400_0004);
     //let prev_vcount = self.fetch_u16(0x0400_0006);
 
@@ -552,6 +561,23 @@ impl GBA {
         ()
       }
       _ => (),
+    }
+  }
+  #[inline]
+  fn trigger_interrupt_if_enabled(&mut self, bit: u32) {
+    const INTERRUPT_ENABLE_REG_ADDR: u32 = 0x0400_0200;
+    const INTERRUPT_ENABLE_MASTER_REG_ADDR: u32 = 0x0400_0208;
+    const INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR: u32 = 0x0400_0202;
+    const BIOS_INTERRUPT_HANDLER: u32 = 00000018;
+    let master_interrupt_enable =
+      self.fetch_u32(INTERRUPT_ENABLE_MASTER_REG_ADDR) & 0x0000_0001 != 0;
+    let cpsr_interrupt_enable = !self.cpsr.irq_disabled_flag();
+    let bit = 1 << bit;
+    let this_interrupt_enable = self.fetch_u32(INTERRUPT_ENABLE_REG_ADDR) & bit != 0;
+    if master_interrupt_enable && cpsr_interrupt_enable && this_interrupt_enable {
+      self.write_u32(INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR, bit);
+      self.set_mode(CpuMode::IRQ);
+      self.regs[15] = BIOS_INTERRUPT_HANDLER;
     }
   }
   pub fn run_forever(&mut self) -> Result<(), GBAError> {
