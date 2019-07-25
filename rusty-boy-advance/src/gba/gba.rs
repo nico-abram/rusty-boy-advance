@@ -459,16 +459,26 @@ impl GBA {
     self.update_hvblank();
     Ok(())
   }
-  pub fn input(&mut self, button: GBAButton) {
-    let val = self.fetch_u16(KEY_STATUS_REG);
+  #[inline]
+  pub fn set_input(&mut self, button: GBAButton, set_else_unset: bool) {
+    let mut val = self.fetch_u16(KEY_STATUS_REG);
     let bit = button.bit();
-    self.write_u16(KEY_STATUS_REG, val & !bit);
+    if set_else_unset {
+      val &= !bit;
+    } else {
+      val |= bit;
+    }
+    self.write_u16(KEY_STATUS_REG, val);
+  }
+  pub fn input(&mut self, button: GBAButton) {
+    self.set_input(button, true);
   }
   pub fn persistent_input_pressed(&mut self, button: GBAButton) {
     self.input(button);
     self.persistent_input_bitmask |= button.bit();
   }
   pub fn persistent_input_released(&mut self, button: GBAButton) {
+    self.set_input(button, false);
     self.persistent_input_bitmask &= !button.bit();
   }
   fn update_hvblank(&mut self) {

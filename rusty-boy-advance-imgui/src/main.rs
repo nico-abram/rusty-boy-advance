@@ -167,7 +167,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       if browsed_memory.breakpoints.is_empty() {
         gba.run_one_frame().unwrap();
       } else {
-        for _ in 0..1000 {
+        for _ in 0..5000 {
           if !just_clicked_continue
             && browsed_memory.breakpoints.iter().any(|x| *x == gba.registers()[15])
           {
@@ -177,6 +177,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           just_clicked_continue = false;
           gba.run_one_instruction().unwrap();
         }
+        gba.update_video_output();
       }
       just_clicked_continue = false;
     }
