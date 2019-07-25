@@ -11,6 +11,7 @@ pub enum CpuMode {
   Undef,
   Privileged,
 }
+
 impl CpuMode {
   /// Returns a number in the 0-5 range. Both User and Priviledged(Systen) use 0.
   ///
@@ -26,6 +27,7 @@ impl CpuMode {
       CpuMode::Undef => 5,
     }
   }
+
   /// In the CPSR status register representation:
   ///
   /// 0b10000 0x10h 16 - User (non-privileged)
@@ -52,6 +54,7 @@ impl CpuMode {
       CpuMode::Privileged => 0b11111,
     }
   }
+
   /// From the CPSR status register representation.
   ///
   /// See [as_byte][CpuMode::as_byte] for details.
@@ -74,6 +77,7 @@ impl core::fmt::Display for CpuMode {
     core::fmt::Debug::fmt(self, f)
   }
 }
+
 impl core::fmt::LowerHex for CpuMode {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(f, "{:x}", self.as_byte())

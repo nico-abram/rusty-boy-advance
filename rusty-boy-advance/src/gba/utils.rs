@@ -6,15 +6,18 @@ pub trait AsBoolSlice {
   fn is_set_n(self, n: u8) -> bool;
   fn as_bools(self) -> [bool; 8];
 }
+
 impl AsBoolSlice for u8 {
   #[inline]
   fn is_set(self, mask: u8) -> bool {
     (self & mask) == mask
   }
+
   #[inline]
   fn is_set_n(self, bit_number: u8) -> bool {
     self.is_set(1u8 << bit_number)
   }
+
   #[inline]
   fn as_bools(self) -> [bool; 8] {
     [

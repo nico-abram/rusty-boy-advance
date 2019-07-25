@@ -50,6 +50,7 @@ pub enum GBAButton {
   ButtonR,
   ButtonL,
 }
+
 impl GBAButton {
   fn bit(self) -> u16 {
     match self {
@@ -66,18 +67,21 @@ impl GBAButton {
     }
   }
 }
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum LogLevel {
   None,
   EveryInstruction,
   Debug,
 }
+
 #[derive(Debug)]
 pub enum GBAError {
   ARM(arm::ARMError),
   Thumb(thumb::ThumbError),
   InvalidRom,
 }
+
 impl GBAError {
   fn as_string(&self) -> &str {
     match self {
@@ -87,17 +91,20 @@ impl GBAError {
     }
   }
 }
+
 impl core::fmt::Display for GBAError {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(f, "{}", self.as_string())
   }
 }
+
 #[cfg(feature = "std")]
 impl std::error::Error for GBAError {
   fn description(&self) -> &str {
     self.as_string()
   }
 }
+
 pub struct GBA {
   //// Output image
   pub(crate) output_texture: [u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
@@ -136,22 +143,13 @@ pub struct GBA {
   pub(crate) executed_instructions_count: u64,
   persistent_input_bitmask: u16,
 }
+
 impl GBA {
   pub(crate) fn new(
     log_level: LogLevel,
     bios_file: core::option::Option<&[u8]>,
     print_fn: Option<fn(&str) -> ()>,
   ) -> Box<Self> {
-    let nothing = |_: &mut GBA| {};
-    let nothing_with_opcode = |_: &mut GBA, _: u32| {};
-    let print_opcode = |gba: &mut GBA, opcode: u32| {
-      gba
-        .print_fn
-        .map(|f| f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str()));
-    };
-    let print_state = |gba: &mut GBA| {
-      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
-    };
     // Was still getting stack overflows without Box X
     let mut gba = box GBA {
       output_texture: [0x00u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
@@ -178,33 +176,41 @@ impl GBA {
       executed_instructions_count: 0,
       persistent_input_bitmask: 0x000,
     };
+
     gba.reset();
+
     //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     gba.bios_rom.clone_from_slice(bios_file);
+
     gba.set_log_level(log_level);
+
     gba
   }
+
   pub(crate) fn set_log_level(&mut self, log_level: LogLevel) {
-    let print_opcode = |gba: &mut GBA, opcode: u32| {
-      gba
-        .print_fn
-        .map(|f| f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str()));
+    const PRINT_OPCODE: fn(&mut GBA, u32) = |gba: &mut GBA, opcode: u32| {
+      if let Some(f) = gba.print_fn {
+        f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str());
+      }
     };
-    let print_state = |gba: &mut GBA| {
-      gba.print_fn.map(|f| f(format!("{}\n", gba.state_as_string()).as_str()));
+    const PRINT_STATE: fn(&mut GBA) = |gba: &mut GBA| {
+      if let Some(f) = gba.print_fn {
+        f(format!("{}\n", gba.state_as_string()).as_str());
+      }
     };
+
     self.instruction_hook = match log_level {
-      LogLevel::Debug | LogLevel::EveryInstruction => Some(print_state),
+      LogLevel::Debug | LogLevel::EveryInstruction => Some(PRINT_STATE),
       LogLevel::None => None,
     };
     self.instruction_hook_with_opcode = match log_level {
-      LogLevel::Debug => Some(print_opcode),
-      LogLevel::EveryInstruction => Some(print_opcode),
+      LogLevel::Debug | LogLevel::EveryInstruction => Some(PRINT_OPCODE),
       LogLevel::None => None,
     };
     self.debug_print_fn = if log_level == LogLevel::Debug { self.print_fn } else { None };
   }
+
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
     let mode = self.cpsr.mode();
     if mode == CpuMode::Privileged || mode == CpuMode::User {
@@ -213,11 +219,13 @@ impl GBA {
       Some(&mut self.spsrs[self.cpsr.mode().as_usize() - 1])
     }
   }
+
   pub(crate) fn set_mode(&mut self, new_mode: CpuMode) {
     let old_mode = self.cpsr.mode();
     if new_mode == old_mode {
       return;
     }
+
     self.cpsr.set_mode(new_mode);
     // FIQ mode banks some extra registers
     if new_mode == CpuMode::FIQ {
@@ -237,6 +245,7 @@ impl GBA {
         unset_fiq(i);
       }
     }
+
     let new_idx = new_mode.as_usize();
     let old_idx = old_mode.as_usize();
     // TODO:
@@ -246,6 +255,7 @@ impl GBA {
     self.regs[13] = self.all_modes_banks[new_idx][0];
     self.regs[14] = self.all_modes_banks[new_idx][1];
   }
+
   /// Max valid addressable value is 224Mb
   pub(crate) fn fetch_byte(&self, addr: u32) -> u8 {
     let addr = addr as usize;
@@ -298,6 +308,7 @@ impl GBA {
       _ => 0u8, //  unimplemented!("Invalid address: {:x}", addr)
     }
   }
+
   pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
     self.write_u8(addr, value as u8);
     self.write_u8(addr + 1, (value >> 8) as u8);
@@ -306,6 +317,7 @@ impl GBA {
     self.write_u16(addr, value as u16);
     self.write_u16(addr + 2, (value >> 16) as u16);
   }
+
   /// The GBA GBA always runs in LE mode
   pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
     self
@@ -368,6 +380,7 @@ impl GBA {
       _ => (), //unimplemented!("Invalid address: {:x}", addr),
     }
   }
+
   pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
     match addr {
       // ROM out of bounds access (Behaviour taken from MGBA)
@@ -377,6 +390,7 @@ impl GBA {
       _ => u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8),
     }
   }
+
   pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
     match addr {
       // ROM out of bounds access (Behaviour taken from MGBA)
@@ -386,6 +400,7 @@ impl GBA {
       _ => u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16),
     }
   }
+
   pub fn reset(&mut self) {
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
@@ -412,9 +427,11 @@ impl GBA {
     self.regs[15] = RESET_HANDLER;
     self.regs[15] = 0x0800_0000; //  To skip BIOS boot code
   }
+
   /// Load a ROM from a reader
   pub fn load(&mut self, rom_bytes: &[u8]) -> Result<(), Box<GBAError>> {
     self.reset();
+
     //TODO: Verify nintendo logo?
     let title = &rom_bytes[0x00A0..0x00AC];
     let title =
@@ -422,15 +439,19 @@ impl GBA {
     let title = String::from_utf8(title.to_vec()).map_err(|_| GBAError::InvalidRom)?;
     let code = &rom_bytes[0x00AC..0x00B0];
     let code = String::from_utf8(code.to_vec()).map_err(|_| GBAError::InvalidRom)?;
+
     for (input, out) in rom_bytes.iter().zip(self.game_pak.iter_mut()) {
       *out = *input;
     }
     self.loaded_rom = Some(Rom::new(Vec::from(rom_bytes), title, code));
+
     Ok(())
   }
+
   pub(crate) fn thumb(&mut self) -> bool {
     self.cpsr.thumb_state_flag()
   }
+
   pub fn state_as_string(&mut self) -> String {
     format!(
       "{}\n{}",
@@ -448,39 +469,50 @@ impl GBA {
       self.cpsr
     )
   }
+
   pub fn run_one_instruction(&mut self) -> Result<(), GBAError> {
     self.instruction_hook.map(|f| f(self));
+
     if self.thumb() {
       thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;
     } else {
       arm::execute_one_instruction(self).map_err(GBAError::ARM)?;
     }
     self.executed_instructions_count += 1;
+
     self.update_hvblank();
+
     Ok(())
   }
+
   #[inline]
   pub fn set_input(&mut self, button: GBAButton, set_else_unset: bool) {
     let mut val = self.fetch_u16(KEY_STATUS_REG);
     let bit = button.bit();
+
     if set_else_unset {
       val &= !bit;
     } else {
       val |= bit;
     }
+
     self.write_u16(KEY_STATUS_REG, val);
   }
+
   pub fn input(&mut self, button: GBAButton) {
     self.set_input(button, true);
   }
+
   pub fn persistent_input_pressed(&mut self, button: GBAButton) {
     self.input(button);
     self.persistent_input_bitmask |= button.bit();
   }
+
   pub fn persistent_input_released(&mut self, button: GBAButton) {
     self.set_input(button, false);
     self.persistent_input_bitmask &= !button.bit();
   }
+
   fn update_hvblank(&mut self) {
     let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
     let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16) % NUM_SCANLINES;
@@ -511,16 +543,20 @@ impl GBA {
     self.write_u16(0x0400_0006, row_offset & 0xFF);
     self.write_u16(0x0400_0004, new_status);
   }
+
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
     while self.clocks < CLOCKS_PER_FRAME {
       //for _ in 1..1000 {
       self.run_one_instruction()?;
     }
     self.clocks -= CLOCKS_PER_FRAME;
+
     self.update_video_output();
     self.write_u16(KEY_STATUS_REG, !self.persistent_input_bitmask);
+
     Ok(())
   }
+
   /// Fills three bytes starting at the given index in the given slice with the RGB values of the given
   /// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
   /// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
@@ -529,10 +565,12 @@ impl GBA {
     let r = ((color & 0x001F) >> 0) as u8;
     let g = ((color & 0x03E0) >> 5) as u8;
     let b = ((color & 0xFC00) >> 10) as u8;
+
     output_texture[(idx * 3) + 0] = (core::cmp::max(r, 14) - 14).overflowing_mul(15).0;
     output_texture[(idx * 3) + 1] = (core::cmp::max(g, 14) - 14).overflowing_mul(15).0;
     output_texture[(idx * 3) + 2] = (core::cmp::max(b, 14) - 14).overflowing_mul(15).0;
   }
+
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
   pub(crate) fn update_video_output(&mut self) {
@@ -573,12 +611,13 @@ impl GBA {
       _ => (),
     }
   }
+
   #[inline]
   fn trigger_interrupt_if_enabled(&mut self, bit: u32) {
     const INTERRUPT_ENABLE_REG_ADDR: u32 = 0x0400_0200;
     const INTERRUPT_ENABLE_MASTER_REG_ADDR: u32 = 0x0400_0208;
     const INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR: u32 = 0x0400_0202;
-    const BIOS_INTERRUPT_HANDLER: u32 = 00000018;
+    const BIOS_INTERRUPT_HANDLER: u32 = 0x0000_0018;
     let master_interrupt_enable =
       self.fetch_u32(INTERRUPT_ENABLE_MASTER_REG_ADDR) & 0x0000_0001 != 0;
     let cpsr_interrupt_enable = !self.cpsr.irq_disabled_flag();
@@ -590,19 +629,23 @@ impl GBA {
       self.regs[15] = BIOS_INTERRUPT_HANDLER;
     }
   }
+
   pub fn run_forever(&mut self) -> Result<(), GBAError> {
     loop {
       self.run_one_frame()?;
     }
   }
+
   #[inline]
   pub(crate) fn sequential_cycle(&self) -> u32 {
     2
   }
+
   #[inline]
   pub(crate) fn nonsequential_cycle(&self) -> u32 {
     2
   }
+
   #[inline]
   pub(crate) fn internal_cycle(&self) -> u32 {
     1
