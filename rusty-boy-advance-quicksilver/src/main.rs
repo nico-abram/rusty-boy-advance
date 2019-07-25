@@ -71,14 +71,7 @@ impl State for GameState {
     gba
       .run_one_frame()
       .map_err(|_| quicksilver::Error::ContextError(String::from("Error running a GBA frame")))?;
-    let mut rgba_formatted = [255u8; 255 * 160 * 4];
-    for (output, input) in rgba_formatted.chunks_mut(4).zip(gba.video_output().chunks(3)) {
-      output[..3].clone_from_slice(input);
-    }
-    let img = Image::from_raw(&rgba_formatted[..], 240, 160, PixelFormat::RGBA)?;
-    // This doesnt work in the browser for some reason (But does on desktop)
-    // https://github.com/ryanisaacg/quicksilver/issues/512
-    //let img = Image::from_raw(self.gba.video_output(), 240, 160, PixelFormat::RGB)?;
+    let img = Image::from_raw(gba.video_output(), 240, 160, PixelFormat::RGB)?;
     window.draw(&img.area(), Img(&img));
     Ok(())
   }
@@ -120,7 +113,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   quicksilver::lifecycle::run_with(
     "Rusty Boy Advance Quicksilver",
     Vector::new(240, 160),
-    Settings { vsync: false, ..Settings::default() },
+    Settings { ..Settings::default() },
     || Ok(GameState { gba }),
   );
   Ok(())
