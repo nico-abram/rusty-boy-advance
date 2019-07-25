@@ -257,148 +257,151 @@ impl GBA {
   }
 
   /// Max valid addressable value is 224Mb
-  pub(crate) fn fetch_byte(&self, addr: u32) -> u8 {
-    let addr = addr as usize;
-    match addr {
+  #[inline]
+  fn fetch_byte_inline(&self, addr: u32) -> u8 {
+    match addr >> 24 {
       // General Internal Memory
       // BIOS - System ROM (16 KBytes) E3A02004
-      0x0000_0000..=0x0000_3FFF => self.bios_rom[addr],
+      0x00 => self.bios_rom[(addr & 0x0000_3FFF) as usize],
       // WRAM - On-board Work RAM  (256 KBytes) 2 Wait
-      0x0200_0000..=0x0203_FFFF => self.wram_board[addr - 0x0200_0000],
+      0x02 => self.wram_board[(addr & 0x00FF_FFFF) as usize],
       // WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
-      0x0300_0000..=0x03FF_FFFF => self.wram_chip[addr & 0x0000_7FFF],
+      0x03 => self.wram_chip[(addr & 0x0000_7FFF) as usize],
       // I/O Registers             (1022 Bytes)
-      0x0400_0000..=0x0400_03FD => self.io_mem[addr - 0x0400_0000], // TODO:IO
-      0x0400_03FE..=0x04FF_FFFF => {
-        self.debug_print_fn.map(|f| f(format!("Bad I/O read at {:x}", addr).as_str()));
-        0
-      }
+      0x04 => match addr {
+        0x0400_0000..=0x0400_03FD => self.io_mem[(addr & 0x00FF_FFFF) as usize],
+        _ => {
+          self.debug_print_fn.map(|f| f(format!("Bad I/O read at {:x}", addr).as_str()));
+          0
+        }
+      },
       // Internal Display Memory
       // BG/OBJ Palette RAM        (1 Kbyte)
-      0x0500_0000..=0x0500_03FF => self.palette_ram[addr - 0x0500_0000],
+      0x05 => self.palette_ram[(addr & 0x00FF_FFFF) as usize],
       // VRAM - Video RAM          (96 KBytes)
       //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
-      0x0600_0000..=0x06FF_FFFF => self.vram[addr & 0x0001_7FFF],
+      0x06 => self.vram[(addr & 0x0001_7FFF) as usize],
       // OAM - OBJ Attributes      (1 Kbyte)
-      0x0700_0000..=0x0700_03FF => self.oam[addr - 0x0700_0000],
+      0x07 => self.oam[(addr & 0x00FF_FFFF) as usize],
       // External Memory (Game Pak)
       // TODO: Wait states
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 0
-      0x0800_0000..=0x09FF_FFFF => {
-        let addr = addr - 0x0800_0000;
-        if addr <= 0x00FF_FFFF {
-          self.game_pak[addr]
-        } else {
-          // Out of bounds ROM access (Behaviour taken from MGBA)
-          ((addr >> 1) & 0x0000_00FF) as u8
-        }
-      }
+      0x08 => self.game_pak[(addr & 0x00FF_FFFF) as usize],
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 1
-      0x0A00_0000..=0x0BFF_FFFF => {
-        let addr = addr - 0x0A00_0000;
-        if addr <= 0x00FF_FFFF { self.game_pak[addr] } else { ((addr >> 1) & 0x0000_00FF) as u8 }
-      }
+      0x0A => self.game_pak[(addr & 0x00FF_FFFF) as usize],
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 2
-      0x0C00_0000..=0x0DFF_FFFF => {
-        let addr = addr - 0x0C00_0000;
-        if addr <= 0x00FF_FFFF { self.game_pak[addr] } else { ((addr >> 1) & 0x0000_00FF) as u8 }
-      }
-      0x0E00_0000..=0x0E00_FFFF => self.game_pak[addr & 0x01FF_FFFF],
-      // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width
+      0x0C => self.game_pak[(addr & 0x00FF_FFFF) as usize],
+      // Out of bounds ROM access (Behaviour taken from MGBA)
+      0x0B | 0x0D | 0x09 => self.game_pak[(addr & 0x01FF_FFFF) as usize],
+      // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width (TODO)
       _ => 0u8, //  unimplemented!("Invalid address: {:x}", addr)
     }
   }
 
-  pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
-    self.write_u8(addr, value as u8);
-    self.write_u8(addr + 1, (value >> 8) as u8);
+  pub(crate) fn fetch_byte(&self, addr: u32) -> u8 {
+    self.fetch_byte_inline(addr)
   }
+
+  #[inline]
+  pub(crate) fn write_u16_inline(&mut self, addr: u32, value: u16) {
+    self.write_u8_inline(addr, value as u8);
+    self.write_u8_inline(addr + 1, (value >> 8) as u8);
+  }
+
+  pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
+    self.write_u16_inline(addr, value);
+  }
+
   pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
-    self.write_u16(addr, value as u16);
-    self.write_u16(addr + 2, (value >> 16) as u16);
+    self.write_u16_inline(addr, value as u16);
+    self.write_u16_inline(addr + 2, (value >> 16) as u16);
   }
 
   /// The GBA GBA always runs in LE mode
-  pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
-    self
-      .debug_print_fn
-      .map(|f| f(format!("\twriting to addr {:x} value {:x}\n", addr, byte).as_str()));
-    let addr = addr as usize;
-    match addr {
+  #[inline]
+  fn write_u8_inline(&mut self, addr: u32, byte: u8) {
+    match addr >> 24 {
       // General Internal Memory
       // BIOS - System ROM (16 KBytes) E3A02004
-      0x0000_0000..=0x0000_3FFF => {
-        self.bios_rom[addr] = byte;
+      0x00 => {
+        self.bios_rom[(addr & 0x00FF_FFFF) as usize] = byte;
       }
       // WRAM - On-board Work RAM  (256 KBytes) 2 Wait
-      0x0200_0000..=0x0203_FFFF => {
-        self.wram_board[addr & 0x0003_FFFF] = byte;
+      0x02 => {
+        self.wram_board[(addr & 0x00FF_FFFF) as usize] = byte;
       }
       // WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
-      0x0300_0000..=0x03FF_FFFF => {
-        self.wram_chip[addr & 0x0000_7FFF] = byte;
+      0x03 => {
+        self.wram_chip[(addr & 0x0000_7FFF) as usize] = byte;
       }
       // I/O Registers             (1022 Bytes)0xFFFF
-      0x0400_0000..=0x0400_03FE => {
-        self.io_mem[addr - 0x0400_0000] = byte;
-      }
-      0x0400_0400..=0x04FF_FFFF => {
-        let _addr = addr & 0xFFFF;
-        self.io_mem[0] = byte;
+      0x04 => {
+        if addr < 0x04FF_FFFF {
+          self.io_mem[(addr & 0x00FF_FFFF) as usize] = byte;
+        } else {
+          self.io_mem[0] = byte;
+        }
       }
       // Internal Display Memory
       // BG/OBJ Palette RAM        (1 Kbyte)
-      0x0500_0000..=0x0500_03FF => {
-        self.palette_ram[addr - 0x0500_0000] = byte;
+      0x05 => {
+        if addr < 0x0500_03FF {
+          self.palette_ram[(addr & 0x00FF_FFFF) as usize] = byte;
+        }
       }
       // VRAM - Video RAM          (96 KBytes)
-      0x0600_0000..=0x0601_7FFF => {
-        self.vram[addr - 0x0600_0000] = byte;
+      0x06 => {
+        self.vram[(addr & 0x00FF_FFFF) as usize] = byte;
       }
       // OAM - OBJ Attributes      (1 Kbyte)
-      0x0700_0000..=0x0700_03FF => {
-        self.oam[addr - 0x0700_0000] = byte;
+      0x07 => {
+        self.oam[(addr & 0x00FF_FFFF) as usize] = byte;
       }
       // External Memory (Game Pak)
       // TODO: Wait states
-      0x0800_0000..=0x09FF_FFFF => {
-        self.game_pak[addr - 0x0800_0000] = byte;
+      // Game Pak ROM/FlashROM (mx 32MB)
+      0x0E | 0x0D | 0x0C | 0x0B | 0x0A => {
+        self.game_pak[(addr & 0x01FF_FFFF) as usize] = byte;
       }
-      // Game Pak ROM/FlashROM (max 32MB) - Wait State 0
-      0x0A00_0000..=0x0BFF_FFFF => {
-        self.game_pak[addr & 0x01FF_FFFF] = byte;
-      }
-      // Game Pak ROM/FlashROM (max 32MB) - Wait State 1
-      0x0C00_0000..=0x0DFF_FFFF => {
-        self.game_pak[addr & 0x01FF_FFFF] = byte;
-      }
-      // Game Pak ROM/FlashROM (mx 32MB) - Wait State 2
-      0x0E00_0000..=0x0E00_FFFF => {
-        self.game_pak[addr & 0x01FF_FFFF] = byte;
-      }
-      // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width
+      // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width (TODO)
       _ => (), //unimplemented!("Invalid address: {:x}", addr),
     }
   }
 
-  pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
-    match addr {
+  pub(crate) fn write_u8(&mut self, addr: u32, byte: u8) {
+    self.write_u8_inline(addr, byte);
+  }
+
+  #[inline]
+  pub(crate) fn fetch_u16_inline(&mut self, addr: u32) -> u16 {
+    match addr >> 24 {
       // ROM out of bounds access (Behaviour taken from MGBA)
-      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
-      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
-      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u16,
-      _ => u16::from(self.fetch_byte(addr)) + (u16::from(self.fetch_byte(addr + 1)) << 8),
+      0x0B | 0x09 | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u16,
+      _ => {
+        u16::from(self.fetch_byte_inline(addr))
+          + (u16::from(self.fetch_byte_inline(addr + 1)) << 8)
+      }
     }
   }
 
-  pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
+  pub(crate) fn fetch_u16(&mut self, addr: u32) -> u16 {
+    self.fetch_u16_inline(addr)
+  }
+
+  #[inline]
+  pub(crate) fn fetch_u32_inline(&mut self, addr: u32) -> u32 {
     match addr {
       // ROM out of bounds access (Behaviour taken from MGBA)
-      0x08FF_FFFF..=0x09FF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      0x0AFF_FFFF..=0x0BFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      0x0CFF_FFFF..=0x0DFF_FFFF => ((addr >> 1) & 0x0000_FFFF) as u32,
-      _ => u32::from(self.fetch_u16(addr)) + (u32::from(self.fetch_u16(addr + 2)) << 16),
+      0x09 | 0x0B | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u32,
+      _ => {
+        u32::from(self.fetch_u16_inline(addr))
+          + (u32::from(self.fetch_u16_inline(addr + 2)) << 16)
+      }
     }
+  }
+  
+  pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
+    self.fetch_u32_inline(addr)
   }
 
   pub fn reset(&mut self) {
@@ -471,7 +474,9 @@ impl GBA {
   }
 
   pub fn run_one_instruction(&mut self) -> Result<(), GBAError> {
-    self.instruction_hook.map(|f| f(self));
+    if let Some(f) = self.instruction_hook {
+      f(self);
+    }
 
     if self.thumb() {
       thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;

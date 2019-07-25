@@ -905,6 +905,7 @@ fn coprocessor_register_transfer(_: &mut GBA, _: u32) -> ARMResult {
 /// Map an opcode to an instruction (An fn(&mut GBA, u32))
 ///
 /// Panics on undefined or invalid opcode.
+#[inline]
 fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
   const T: bool = true;
   const F: bool = false;
@@ -945,12 +946,16 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
 }
 
 pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ARMResult {
-  let pc = gba.regs[15];
-  let opcode = gba.fetch_u32(pc);
+  let opcode = {
+    let pc = gba.regs[15];
+    gba.fetch_u32_inline(pc)
+  };
 
   gba.regs[15] += 4;
 
-  gba.instruction_hook_with_opcode.map(|f| f(gba, opcode));
+  if let Some(f) = gba.instruction_hook_with_opcode {
+    f(gba, opcode);
+  }
 
   if check_cond(gba, opcode) {
     return Ok(());

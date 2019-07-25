@@ -761,6 +761,7 @@ fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16
   Ok(())
 }
 
+#[inline]
 fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
   const T: bool = true;
   const F: bool = false;
@@ -794,11 +795,13 @@ fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
 
 pub(crate) fn execute_one_instruction(gba: &mut GBA) -> ThumbResult {
   let pc = gba.regs[15];
-  let opcode = gba.fetch_u16(pc);
+  let opcode = gba.fetch_u16_inline(pc);
 
   gba.regs[15] = pc.overflowing_add(2).0;
 
-  gba.instruction_hook_with_opcode.map(|f| f(gba, u32::from(opcode)));
+  if let Some(f) = gba.instruction_hook_with_opcode {
+    f(gba, u32::from(opcode));
+  }
 
   let instruction = decode_thumb(opcode)?;
   instruction(gba, opcode)?;
