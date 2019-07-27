@@ -64,7 +64,6 @@ fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let offset = as_bits_6_to_10(opcode);
   let operand = gba.regs[rs];
 
-  // TODO: Special 0 shifts
   let res = if offset == 0 {
     super::arm::special_shift_by_zero(gba, operation as u8, operand).0
   } else {
@@ -203,7 +202,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     0x2 => {
       //LSL (Logical Shift Left)
       let rs_val = rs_val & 0x00FF;
-      let result = rd_val << std::cmp::min(rs_val & 0x00FF, 32);
+      let result = rd_val.checked_shl(rs_val).unwrap_or(0);
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
@@ -216,7 +215,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     0x3 => {
       //LSR (Logical Shift Right)
       let rs_val = rs_val & 0x00FF;
-      let result = rd_val >> rs_val;
+      let result = rd_val.checked_shr(rs_val).unwrap_or(0);
       gba.regs[rd] = result;
       gba.cpsr.set_all_status_flags(
         result,
@@ -427,13 +426,6 @@ fn pc_relative_load(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let byte = u32::from(as_low_byte(opcode));
   let offset = byte << 2; // In steps of 4
 
-  gba.print_fn.map(|f| {
-    f(format!(
-      "pc rel load addr: {:x}",
-      ((gba.regs[15].overflowing_add(2).0) & 0xFFFF_FFFC).overflowing_add(offset).0
-    )
-    .as_str())
-  });
   gba.regs[rd] =
     gba.fetch_u32((gba.regs[15].overflowing_add(2).0).overflowing_add(offset).0 & 0xFFFF_FFFC);
 
@@ -450,14 +442,14 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
   let (addr, _) = gba.regs[ro].overflowing_add(gba.regs[rb]);
 
   if is_load_else_store {
-    gba.regs[rd] =
-      if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else if (addr & 0x0000_0002) != 0 {
-        let addr = addr & 0xFFFF_FFFD;
-        (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
-      } else {
-        gba.fetch_u32(addr & 0xFFFF_FFFD)
-      };
-    
+    gba.regs[rd] = if is_byte_else_word {
+      u32::from(gba.fetch_byte(addr))
+    } else if (addr & 0x0000_0002) != 0 {
+      let addr = addr & 0xFFFF_FFFD;
+      (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
+    } else {
+      gba.fetch_u32(addr & 0xFFFF_FFFD)
+    };
   } else if is_byte_else_word {
     gba.write_u8(addr, gba.regs[rd] as u8);
   } else {

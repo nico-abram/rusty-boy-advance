@@ -337,7 +337,7 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     addr = add_offset(addr, offset);
   }
   if is_load_else_store {
-    match opcode {
+    gba.regs[rd] = match opcode {
       1 => {
         // Load Unsigned halfword (zero-extended)
         gba.debug_print_fn.map(|f| {
@@ -349,21 +349,21 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
           )
           .as_str())
         });
-        gba.regs[rd] = gba.fetch_u16(addr) as u32;
+        gba.fetch_u16(addr) as u32
       }
       2 => {
         // Load Signed byte (sign extended)
-        gba.regs[rd] = gba.fetch_byte(addr) as i8 as i32 as u32;
+        gba.fetch_byte(addr) as i8 as i32 as u32
       }
       3 => {
         // Load Signed halfword (sign extended)
-        gba.regs[rd] = gba.fetch_u16(addr) as i16 as i32 as u32;
+        gba.fetch_u16(addr) as i16 as i32 as u32
       }
       0 => core::panic!(
         "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
       ),
       _ => unreachable!(), // It's 2 bits
-    }
+    };
   } else {
     match opcode {
       1 => {
@@ -398,7 +398,7 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
   if !is_pre_offseted {
     addr = add_offset(addr, offset);
   }
-  if !is_pre_offseted || write_back {
+  if (!is_pre_offseted || write_back) && rn != rd {
     gba.regs[rn] = addr;
   }
 
@@ -420,28 +420,18 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   }
 
   let offset = if !shifted_register {
-    gba
-      .print_fn
-      .map(|f| f(format!("addr:{:x} imm_offset:{:x}", addr, opcode & 0x0000_0FFF).as_str()));
     opcode & 0x0000_0FFF
   } else {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
     let shift_type = (second_byte >> 1) & 0x0000_0003;
     let register_value = gba.regs[first_byte];
-    gba.print_fn.map(|f| {
-      f(format!(
-        "addr:{:x} shift_amount:{:x} shift_type:{:x} register_value:{:x}",
-        addr, shift_amount, shift_type, register_value
-      )
-      .as_str())
-    });
     if shift_amount == 0 {
       special_shift_by_zero(gba, shift_type as u8, register_value).0
     } else {
       match shift_type {
-        0 => register_value.overflowing_shl(shift_amount).0,
-        1 => register_value.overflowing_shr(shift_amount).0,
-        2 => (register_value as i32).overflowing_shr(shift_amount).0 as u32,
+        0 => register_value.checked_shl(shift_amount).unwrap_or(0),
+        1 => register_value.checked_shr(shift_amount).unwrap_or(0),
+        2 => (register_value as i32).overflowing_shr(core::cmp::min(shift_amount, 31)).0 as u32,
         3 => register_value.rotate_right(shift_amount),
         _ => {
           return Err(format!(

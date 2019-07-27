@@ -409,7 +409,7 @@ impl GBA {
     self.all_modes_banks = [[0u32; 2]; 6];
     self.io_mem = [0u8; 1022];
     self.write_u32(0x0400_0088, 0x200);
-    self.spsrs = [CPSR(0x0000_0000F); 5];
+    self.spsrs = [CPSR(0x0000_001F); 5];
     self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x0300_7FA0;
     self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x0300_7FE0;
     self.cpsr = CPSR(0x0000_001F);
