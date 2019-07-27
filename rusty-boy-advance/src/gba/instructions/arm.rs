@@ -480,81 +480,145 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let rlists = [rlist1, rlist2];
   let is_psr = psr_or_user_mode && is_load_else_store && ((rlist2 & 0x80) != 0);
 
+          gba.print_fn.map(|f| {
+            f(format!(
+              "psr_or_user_mode:{} is_psr:{}",
+              psr_or_user_mode, is_psr
+            )
+            .as_str())
+          });
   let get_mut_reg: fn(&mut GBA, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
     // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
     // "You must not use it in User mode or System mode.". How strict is that requirement?
-    |gba, x| match x {
-      0..=7 => &mut gba.regs[x],
-      8..=12 => {
-        if gba.cpsr.mode() == CpuMode::FIQ {
-          &mut gba.fiq_only_banks[0][x - 8]
-        } else {
-          &mut gba.regs[x]
+    if gba.cpsr.mode() == CpuMode::User {
+      |gba, x| &mut gba.regs[x]
+    } else {
+      |gba, x| match x {
+        0..=7 => &mut gba.regs[x],
+        8..=12 => {
+          if gba.cpsr.mode() == CpuMode::FIQ {
+            &mut gba.fiq_only_banks[0][x - 8]
+          } else {
+            &mut gba.regs[x]
+          }
         }
+        13..=15 => &mut gba.all_modes_banks[CpuMode::User.as_usize()][x - 13],
+        _ => unimplemented!(
+          "This should never happen. Attempt to access an invalid register number ({})",
+          x
+        ),
       }
-      13..=15 => &mut gba.all_modes_banks[CpuMode::User.as_usize()][x - 13],
-      _ => unimplemented!(
-        "This should never happen. Attempt to access an invalid register number ({})",
-        x
-      ),
     }
   } else {
     |gba, x| &mut gba.regs[x]
   };
-  let mut sp = *get_mut_reg(gba, rn);
 
-  let offseting_operation: fn(&mut u32, u32) = if !is_up {
-    |sp, offset| {
-      *sp -= offset;
+  let offseting_operation: fn(&mut u32) = if !is_up {
+    |sp| {
+      *sp -= 4;
     }
   } else {
-    |sp, offset| {
-      *sp += offset;
+    |sp| {
+      *sp += 4;
     }
   };
 
   let is_push = !is_load_else_store;
-  let push_or_pop_operation: fn(&mut GBA, usize, u32) = if is_push {
-    |gba, reg, sp| gba.write_u32(sp, gba.regs[reg])
+  let push_or_pop_operation: fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, u32) = if is_push {
+    |gba, get_mut_reg, reg, sp|{ let val = *get_mut_reg(gba, reg); gba.write_u32(sp, val) }
   } else {
-    |gba, reg, sp| gba.regs[reg] = gba.fetch_u32(sp)
+    |gba, get_mut_reg, reg, sp| *get_mut_reg(gba, reg) = gba.fetch_u32(sp)
   };
 
+  let operation: fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, &mut u32, fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, u32), fn(&mut u32)) =
+    if is_pre_offseted {
+      |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
+        offseting_operation(sp);
+        push_or_pop_operation(gba, get_mut_reg, reg, *sp);
+      }
+    } else {
+      |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
+        push_or_pop_operation(gba, get_mut_reg, reg, *sp);
+        offseting_operation(sp);
+      }
+    };
+
+  let mut sp = *get_mut_reg(gba, rn);
+  let mut sp_was_last_modified_reg = false;
   let mut n = 0;
+
+  gba.print_fn.map(|f| {
+    f(format!("is_up :{} is_pre_offseted:{} is_push:{} sp:{}", is_up, is_pre_offseted, is_push, rn)
+      .as_str())
+  });
   // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
   // So we use regular fors (For now)
-  if is_pre_offseted {
-    for (byte_number, byte) in rlists.iter().enumerate().rev() {
-      for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
-        if bit_is_set {
-          n += 1;
-          let bit_number = byte_number * 8 + bit_in_byte;
-          offseting_operation(&mut sp, 4);
-          push_or_pop_operation(gba, bit_number, sp);
-        }
-      }
-    }
-  } else {
+  if is_up {
     for (byte_number, byte) in rlists.iter().enumerate() {
       for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate() {
         if bit_is_set {
           n += 1;
           let bit_number = byte_number * 8 + bit_in_byte;
-          push_or_pop_operation(gba, bit_number, sp);
-          offseting_operation(&mut sp, 4);
+
+          gba.print_fn.map(|f| {
+            f(format!(
+              "no rev doing reg:{} n:{} sp_was_last_modified_reg:{}",
+              bit_number, n, sp_was_last_modified_reg
+            )
+            .as_str())
+          });
+          let is_sp = bit_number == rn;
+          sp_was_last_modified_reg = is_sp;
+
+          operation(gba, get_mut_reg, bit_number, &mut sp, push_or_pop_operation, offseting_operation);
+        }
+      }
+    }
+  } else {
+    for (byte_number, byte) in rlists.iter().enumerate().rev() {
+      for (bit_in_byte, &bit_is_set) in byte.as_bools().iter().rev().enumerate().rev() {
+        if bit_is_set {
+          n += 1;
+          let bit_number = byte_number * 8 + bit_in_byte;
+
+          gba.print_fn.map(|f| {
+            f(format!(
+              "doing reg:{} n:{} sp_was_last_modified_reg:{}",
+              bit_number, n, sp_was_last_modified_reg
+            )
+            .as_str())
+          });
+          let is_sp = bit_number == rn;
+          if is_sp {
+            sp_was_last_modified_reg = n == 1;
+          }
+
+          operation(gba, get_mut_reg, bit_number, &mut sp, push_or_pop_operation, offseting_operation);
         }
       }
     }
   }
 
-  if write_back {
+  gba.print_fn.map(|f| {
+    f(format!(
+      "write_back :{} is_load_else_store:{} sp_was_last_modified_reg:{}",
+      write_back, is_load_else_store, sp_was_last_modified_reg
+    )
+    .as_str())
+  });
+  // Load & sp in rlist => dont write
+  // store & sp last reg modified => dont write
+  if write_back && !sp_was_last_modified_reg {
+    gba.print_fn.map(|f| f(format!("writing back:{:x}", sp).as_str()));
     *get_mut_reg(gba, rn) = sp;
   }
 
   if is_psr {
-    gba.cpsr = *gba
+    let spsr = *gba
       .get_spsr_mut()
       .ok_or("Cannot use ^(PSR) on arm BDT while in User or Priviledged(System) mode")?;
+    gba.set_mode(spsr.mode());
+    gba.cpsr = spsr;
   }
 
   gba.clocks += gba.nonsequential_cycle()
