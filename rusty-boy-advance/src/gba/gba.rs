@@ -277,7 +277,7 @@ impl GBA {
       },
       // Internal Display Memory
       // BG/OBJ Palette RAM        (1 Kbyte)
-      0x05 => self.palette_ram[(addr & 0x00FF_FFFF) as usize],
+      0x05 => self.palette_ram[(addr & 0x0000_03FF) as usize],
       // VRAM - Video RAM          (96 KBytes)
       //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
       0x06 => self.vram[(addr & 0x0001_7FFF) as usize],
@@ -336,7 +336,7 @@ impl GBA {
       }
       // I/O Registers             (1022 Bytes)0xFFFF
       0x04 => {
-        if addr < 0x04FF_FFFF {
+        if addr < (0x0400_0000 + 1022) {
           self.io_mem[(addr & 0x00FF_FFFF) as usize] = byte;
         } else {
           self.io_mem[0] = byte;
@@ -378,8 +378,7 @@ impl GBA {
       // ROM out of bounds access (Behaviour taken from MGBA)
       0x0B | 0x09 | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u16,
       _ => {
-        u16::from(self.fetch_byte_inline(addr))
-          + (u16::from(self.fetch_byte_inline(addr + 1)) << 8)
+        u16::from(self.fetch_byte_inline(addr)) + (u16::from(self.fetch_byte_inline(addr + 1)) << 8)
       }
     }
   }
@@ -394,12 +393,10 @@ impl GBA {
       // ROM out of bounds access (Behaviour taken from MGBA)
       0x09 | 0x0B | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u32,
       _ => {
-        u32::from(self.fetch_u16_inline(addr))
-          + (u32::from(self.fetch_u16_inline(addr + 2)) << 16)
+        u32::from(self.fetch_u16_inline(addr)) + (u32::from(self.fetch_u16_inline(addr + 2)) << 16)
       }
     }
   }
-  
   pub(crate) fn fetch_u32(&mut self, addr: u32) -> u32 {
     self.fetch_u32_inline(addr)
   }

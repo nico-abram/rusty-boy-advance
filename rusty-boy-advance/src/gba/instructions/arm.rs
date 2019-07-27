@@ -420,22 +420,35 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   }
 
   let offset = if !shifted_register {
+    gba
+      .print_fn
+      .map(|f| f(format!("addr:{:x} imm_offset:{:x}", addr, opcode & 0x0000_0FFF).as_str()));
     opcode & 0x0000_0FFF
   } else {
     let shift_amount = (third_byte as u32) * 2 + (((second_byte as u32) & 0x8) >> 3);
-    let shift_type = second_byte;
+    let shift_type = (second_byte >> 1) & 0x0000_0003;
     let register_value = gba.regs[first_byte];
-
-    match shift_type & 6 {
-      0 => register_value.overflowing_shl(shift_amount).0,
-      2 => register_value.overflowing_shr(shift_amount).0,
-      4 => (register_value as i32).overflowing_shr(shift_amount).0 as u32,
-      6 => register_value.rotate_right(shift_amount),
-      _ => {
-        return Err(format!(
-          "Invalid instruction SDis_thumb_state_flag(Single Data Transfer) shift type {}",
-          shift_type & 6
-        ));
+    gba.print_fn.map(|f| {
+      f(format!(
+        "addr:{:x} shift_amount:{:x} shift_type:{:x} register_value:{:x}",
+        addr, shift_amount, shift_type, register_value
+      )
+      .as_str())
+    });
+    if shift_amount == 0 {
+      special_shift_by_zero(gba, shift_type as u8, register_value).0
+    } else {
+      match shift_type {
+        0 => register_value.overflowing_shl(shift_amount).0,
+        1 => register_value.overflowing_shr(shift_amount).0,
+        2 => (register_value as i32).overflowing_shr(shift_amount).0 as u32,
+        3 => register_value.rotate_right(shift_amount),
+        _ => {
+          return Err(format!(
+            "Invalid instruction SDis_thumb_state_flag(Single Data Transfer) shift type {}",
+            shift_type & 6
+          ));
+        }
       }
     }
   };
@@ -450,8 +463,8 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
       // Least significant byte
       u32::from(gba.fetch_byte(addr))
     } else {
-      gba.fetch_u32(addr)
-    };
+      gba.fetch_u32(addr & 0xFFFF_FFFC).rotate_right((addr & 0x0000_0003) * 8)
+    }
   } else if is_byte_size {
     gba.write_u8(addr, gba.regs[rd] as u8);
   } else {
@@ -462,7 +475,7 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
     addr = add_offset(addr);
   }
 
-  if !is_pre_offseted || bit_21 {
+  if (!is_pre_offseted || bit_21) && rn != rd {
     gba.regs[rn] = addr;
   }
 
@@ -570,13 +583,35 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   Ok(())
 }
 
+#[inline]
+pub fn special_shift_by_zero(
+  gba: &mut GBA,
+  shift_type: u8,
+  register_value: u32,
+) -> (u32, Option<bool>) {
+  match shift_type {
+    0 => (register_value, None),
+    1 => (0, Some((register_value & 0x8000_0000) != 0)),
+    2 => (
+      (register_value as i32).overflowing_shr(31).0 as u32,
+      Some((register_value & 0x8000_0000) != 0),
+    ),
+    3 => (
+      (register_value as i32).overflowing_shr(1).0 as u32
+        | if gba.cpsr.carry_flag() { 0x8000_0000 } else { 0 },
+      Some((register_value & 0x0000_0001) != 0),
+    ),
+    _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
+  }
+}
+
 /// Data Processing or PSR transfer
 /// This handles all ALU operations
 fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
   let immediate = as_extra_flag(opcode);
   let (rn_num, rd, _, _, _) = as_usize_nibbles(opcode);
   let (_, _, third_byte, second_byte, lowest_byte) = as_u8_nibbles(opcode);
-  let set_condition_flags = (opcode & 0x0010_0000) != 0 || rd == 15;
+  let set_condition_flags = (opcode & 0x0010_0000) != 0;
   let operation = ((opcode & 0x01E0_0000) >> 21) as u8;
 
   let mut rn = gba.regs[rn_num];
@@ -584,96 +619,85 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     rn = rn.overflowing_add(4).0; // Account for PC pipelining
   }
 
-  let (op2, shift_carry) = if immediate {
-    let ror_shift = u32::from(third_byte) << 1;
-    let val = u32::from(lowest_byte + second_byte * 16);
+  let (op2, shift_carry) = {
+    if immediate {
+      let ror_shift = u32::from(third_byte) << 1;
+      let val = u32::from(lowest_byte + second_byte * 16);
 
-    (
-      val.rotate_right(ror_shift),
-      if ror_shift == 0 { None } else { Some(((val >> (ror_shift - 1)) & 1) != 0) },
-    )
-  } else {
-    let mut register_value: u32 = gba.regs[lowest_byte as usize];
-    if lowest_byte == 15 {
-      register_value += 4;
-    }
-
-    let shift_by_register = (opcode & 0x0000_0010) != 0;
-    let mut imm_shift_zero = false;
-
-    let shift_amount = if shift_by_register {
+      (
+        val.rotate_right(ror_shift),
+        if ror_shift == 0 { None } else { Some(((val >> (ror_shift - 1)) & 1) != 0) },
+      )
+    } else {
+      let shift_by_register = (opcode & 0x0000_0010) != 0;
+      let mut register_value: u32 = gba.regs[lowest_byte as usize];
       if lowest_byte == 15 {
         register_value += 4;
       }
-      if rn_num == 15 {
-        rn = rn.overflowing_add(4).0; // Account for PC+12 if I=0,R=1 (shift by register)
-      }
-      (gba.regs[third_byte as usize] & 0x0000_00FF)
-        .overflowing_add(if third_byte == 15 { 4 } else { 0 })
-        .0
-    } else {
-      let shift_amount = (opcode & 0x0000_0F80) >> 7;
-      imm_shift_zero = shift_amount == 0;
-      shift_amount
-    };
 
-    let shift_type = ((opcode & 0x0000_0060) >> 5) as u8;
+      let mut imm_shift_zero = false;
 
-    let (op2, shift_carry) = if imm_shift_zero {
-      // Handle special shift by 0 case
-      match shift_type {
-        0 => (register_value, None),
-        1 => (0, Some((register_value & 0x8000_0000) != 0)),
-        2 => (
-          (register_value as i32).overflowing_shr(31).0 as u32,
-          Some((register_value & 0x8000_0000) != 0),
-        ),
-        3 => (
-          (register_value as i32).overflowing_shr(1).0 as u32
-            | if gba.cpsr.carry_flag() { 0x8000_0000 } else { 0 },
-          Some((register_value & 0x0000_0001) != 0),
-        ),
-        _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
-      }
-    } else {
-      let shift_amount = core::cmp::min(shift_amount, 31);
+      let shift_amount = if shift_by_register {
+        if lowest_byte == 15 {
+          register_value += 4;
+        }
+        if rn_num == 15 {
+          rn = rn.overflowing_add(4).0; // Account for PC+12 if I=0,R=1 (shift by register)
+        }
+        (gba.regs[third_byte as usize] & 0x0000_00FF)
+          .overflowing_add(if third_byte == 15 { 4 } else { 0 })
+          .0
+      } else {
+        let shift_amount = (opcode & 0x0000_0F80) >> 7;
+        imm_shift_zero = shift_amount == 0;
+        shift_amount
+      };
 
-      match shift_type {
-        0 => (
-          register_value.overflowing_shl(shift_amount).0,
-          if shift_amount == 0 {
-            None
-          } else {
-            Some(((register_value >> (32 - shift_amount)) & 1) != 0)
-          },
-        ),
-        1 => (
-          register_value.overflowing_shr(shift_amount).0,
-          if shift_amount != 0 {
-            Some(((register_value >> (shift_amount - 1)) & 1) != 0)
-          } else {
-            None
-          },
-        ),
-        2 => (
-          (register_value as i32).overflowing_shr(shift_amount).0 as u32,
-          if shift_amount != 0 { Some(((register_value >> 31) & 1) != 0) } else { None },
-        ),
-        3 => (
-          register_value.rotate_right(shift_amount),
-          if shift_amount != 0 {
-            Some(((register_value.overflowing_shr(shift_amount - 1).0) & 1) != 0)
-          } else {
-            None
-          },
-        ),
-        _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
-      }
-    };
-    (op2, if shift_by_register && third_byte == 0 { None } else { shift_carry })
+      let shift_type = ((opcode & 0x0000_0060) >> 5) as u8;
+      let (op2, shift_carry) = if imm_shift_zero {
+        // Handle special shift by 0 case
+        special_shift_by_zero(gba, shift_type, register_value)
+      } else {
+        let shift_amount = core::cmp::min(shift_amount, 31);
+
+        match shift_type {
+          0 => (
+            register_value.overflowing_shl(shift_amount).0,
+            if shift_amount == 0 {
+              None
+            } else {
+              Some(((register_value >> (32 - shift_amount)) & 1) != 0)
+            },
+          ),
+          1 => (
+            register_value.overflowing_shr(shift_amount).0,
+            if shift_amount != 0 {
+              Some(((register_value >> (shift_amount - 1)) & 1) != 0)
+            } else {
+              None
+            },
+          ),
+          2 => (
+            (register_value as i32).overflowing_shr(shift_amount).0 as u32,
+            if shift_amount != 0 { Some(((register_value >> 31) & 1) != 0) } else { None },
+          ),
+          3 => (
+            register_value.rotate_right(shift_amount),
+            if shift_amount != 0 {
+              Some(((register_value.overflowing_shr(shift_amount - 1).0) & 1) != 0)
+            } else {
+              None
+            },
+          ),
+          _ => unimplemented!("Impossible. We AND'ed 2 bits, there are 4 posibilities"),
+        }
+      };
+      (op2, if shift_by_register && third_byte == 0 { None } else { shift_carry })
+    }
   };
 
   let res = &mut gba.regs[rd];
+
   let cpsr = gba.cpsr;
   let ref_cpsr = &mut gba.cpsr;
 
@@ -809,6 +833,12 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     _ => unimplemented!("Impossible. We AND'ed 4 bits, there are 16 posibilities"),
   }
 
+  if rd == 15 && set_condition_flags {
+    let spsr = *gba.get_spsr_mut().ok_or("Cannot use MOV PC, LR while in User mode")?;
+    gba.set_mode(spsr.mode());
+    gba.cpsr = spsr;
+  }
+
   // See http://problemkaputt.de/gbatek.htm#armopcodesdataprocessingalu
   // (1+p)S+rI+pN. Whereas r=1 if I=0 and R=1 (ie. shift by register); otherwise r=0. And p=1 if Rd=R15; otherwise p=0.
   gba.clocks += gba.sequential_cycle()
@@ -849,6 +879,7 @@ fn move_to_status_register(gba: &mut GBA, opcode: u32) -> ARMResult {
     // I *think* I don't need to check for priviledged mode since user
     // mode has no spsr
     *spsr = CPSR((old & invalid_bits_mask) | (operand & valid_bits_mask));
+  //spsr.set_mode(spsr.mode());
   } else {
     // If modifying the cpsr, we must call the GBA's set_mode
     // to change banks if necessary

@@ -4,7 +4,7 @@ use rusty_boy_advance::GBABox;
 #[allow(clippy::unneeded_field_pattern)]
 pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error::Error>> {
   let mut frames_left_to_run = frames_to_run;
-  let sdl = unsafe { beryllium::init() }?;
+  let sdl = beryllium::init()?;
   let mut surface = sdl.create_rgb_surface(240, 160, SurfaceFormat::DIRECT24_DEFAULT)?;
   let pitch = surface.pitch() as usize;
 

@@ -65,12 +65,16 @@ fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let operand = gba.regs[rs];
 
   // TODO: Special 0 shifts
-  let res = match operation {
-    0 => operand << offset,
-    1 => operand >> offset,
-    2 => ((operand as i32) >> offset) as u32,
-    3 => unimplemented!("reserved"),
-    _ => unreachable!(), // We're matching on 2 bits
+  let res = if offset == 0 {
+    super::arm::special_shift_by_zero(gba, operation as u8, operand).0
+  } else {
+    match operation {
+      0 => operand << offset,
+      1 => operand >> offset,
+      2 => ((operand as i32) >> offset) as u32,
+      3 => unimplemented!("reserved"),
+      _ => unreachable!(), // We're matching on 2 bits
+    }
   };
   gba.regs[rd] = res;
 
@@ -114,7 +118,12 @@ fn add_or_sub(gba: &mut GBA, opcode: u16) -> ThumbResult {
     result
   } else {
     let (result, overflow) = first_operand.overflowing_add(second_operand);
-    gba.cpsr.set_all_status_flags(result, Some(overflow), Some(!overflow));
+    gba.cpsr.set_all_status_flags_for_addition(
+      result,
+      first_operand,
+      second_operand,
+      Some(overflow),
+    );
     result
   };
 
@@ -418,8 +427,15 @@ fn pc_relative_load(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let byte = u32::from(as_low_byte(opcode));
   let offset = byte << 2; // In steps of 4
 
+  gba.print_fn.map(|f| {
+    f(format!(
+      "pc rel load addr: {:x}",
+      ((gba.regs[15].overflowing_add(2).0) & 0xFFFF_FFFC).overflowing_add(offset).0
+    )
+    .as_str())
+  });
   gba.regs[rd] =
-    gba.fetch_u32(((gba.regs[15].overflowing_add(2).0) & 0xFFFF_FFFC).overflowing_add(offset).0);
+    gba.fetch_u32((gba.regs[15].overflowing_add(2).0).overflowing_add(offset).0 & 0xFFFF_FFFC);
 
   gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();
 
@@ -435,7 +451,13 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
 
   if is_load_else_store {
     gba.regs[rd] =
-      if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else { gba.fetch_u32(addr) };
+      if is_byte_else_word { u32::from(gba.fetch_byte(addr)) } else if (addr & 0x0000_0002) != 0 {
+        let addr = addr & 0xFFFF_FFFD;
+        (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
+      } else {
+        gba.fetch_u32(addr & 0xFFFF_FFFD)
+      };
+    
   } else if is_byte_else_word {
     gba.write_u8(addr, gba.regs[rd] as u8);
   } else {
@@ -501,7 +523,12 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
     let offset = offset << 2;
     let addr = offset.overflowing_add(rb_val).0;
     if is_load_else_store {
-      gba.regs[rd] = gba.fetch_u32(addr);
+      gba.regs[rd] = if (addr & 0x0000_0002) != 0 {
+        let addr = addr & 0xFFFF_FFFD;
+        (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
+      } else {
+        gba.fetch_u32(addr & 0xFFFF_FFFD)
+      };
     } else {
       gba.write_u32(addr, gba.regs[rd]);
     }
