@@ -305,7 +305,7 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.cpsr.set_all_status_flags(
         result,
         Some(borrow_from(0, rs_val)),
-        Some(((0 ^ rs_val) as i32) < 0 && ((rs_val ^ result) as i32) >= 0),
+        Some((rs_val as i32) < 0 && ((rs_val ^ result) as i32) >= 0),
       );
 
       gba.clocks += gba.sequential_cycle();
@@ -736,7 +736,7 @@ fn software_interrupt(gba: &mut GBA, opcode: u16) -> ThumbResult {
 /// B
 fn branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let is_negative = (opcode & 0x0000_0400) != 0; // 11th bit
-  let absolute_offset = ((opcode & 0x0000_03FF) as u32) << 1; // first 10 bits
+  let absolute_offset = u32::from(opcode & 0x0000_03FF) << 1; // first 10 bits
   let pc = gba.regs[15];
 
   gba.regs[15] = if is_negative {

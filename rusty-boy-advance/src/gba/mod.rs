@@ -1,5 +1,6 @@
 mod cpsr;
 mod cpu_mode;
+#[allow(clippy::module_inception)]
 mod gba;
 mod instructions;
 mod rom;

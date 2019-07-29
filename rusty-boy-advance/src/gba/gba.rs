@@ -271,7 +271,9 @@ impl GBA {
       0x04 => match addr {
         0x0400_0000..=0x0400_03FD => self.io_mem[(addr & 0x00FF_FFFF) as usize],
         _ => {
-          self.debug_print_fn.map(|f| f(format!("Bad I/O read at {:x}", addr).as_str()));
+          if let Some(f) = self.debug_print_fn {
+            f(format!("Bad I/O read at {:x}", addr).as_str());
+          }
           0
         }
       },
@@ -310,11 +312,29 @@ impl GBA {
 
   pub(crate) fn write_u16(&mut self, addr: u32, value: u16) {
     self.write_u16_inline(addr, value);
+    if addr & 0xFFFF_FF00 == 0x0400_0000 && (value & 0x0000_8000) != 0 {
+      match addr {
+        0x0400_00BA => self.do_dma(0x0400_00B0), // DMA 0
+        0x0400_00C6 => self.do_dma(0x0400_00BC), // DMA 1
+        0x0400_00D2 => self.do_dma(0x0400_00C8), // DMA 2
+        0x0400_00DE => self.do_dma(0x0400_00D4), // DMA 3
+        _ => (),
+      }
+    }
   }
 
   pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
     self.write_u16_inline(addr, value as u16);
     self.write_u16_inline(addr + 2, (value >> 16) as u16);
+    if addr & 0xFFFF_FF00 == 0x0400_0000 && (value & 0x0000_8000) != 0 {
+      match addr {
+        0x0400_00BA => self.do_dma(0x0400_00B0), // DMA 0
+        0x0400_00C6 => self.do_dma(0x0400_00BC), // DMA 1
+        0x0400_00D2 => self.do_dma(0x0400_00C8), // DMA 2
+        0x0400_00DE => self.do_dma(0x0400_00D4), // DMA 3
+        _ => (),
+      }
+    }
   }
 
   /// The GBA GBA always runs in LE mode
@@ -324,7 +344,7 @@ impl GBA {
       // General Internal Memory
       // BIOS - System ROM (16 KBytes) E3A02004
       0x00 => {
-        self.bios_rom[(addr & 0x00FF_FFFF) as usize] = byte;
+        self.bios_rom[(addr & 0x0000_3FFF) as usize] = byte;
       }
       // WRAM - On-board Work RAM  (256 KBytes) 2 Wait
       0x02 => {
@@ -425,7 +445,7 @@ impl GBA {
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
     self.regs[13] = 0x0300_7F00; // Taken from mgba
     self.regs[15] = RESET_HANDLER;
-    self.regs[15] = 0x0800_0000; //  To skip BIOS boot code
+    self.regs[15] = 0x0800_0000; // Skip BIOS
   }
 
   /// Load a ROM from a reader
@@ -562,6 +582,7 @@ impl GBA {
   /// Fills three bytes starting at the given index in the given slice with the RGB values of the given
   /// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
   /// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
+  #[allow(clippy::identity_op)]
   #[inline]
   fn fill_output_color(output_texture: &mut [u8], idx: usize, color: u16) {
     let r = ((color & 0x001F) >> 0) as u8;
@@ -575,6 +596,7 @@ impl GBA {
 
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
+  #[allow(clippy::unused_unit)]
   pub(crate) fn update_video_output(&mut self) {
     let bg_mode = self.io_mem[0] & 0x0000_0007;
     match bg_mode {
@@ -583,9 +605,10 @@ impl GBA {
       2 => (),
       3 => {
         // 16 bit color bitmap. One frame buffer (240x160 pixels, 32768 colors)
+        #[allow(clippy::match_ref_pats)]
         for (idx, slice) in self.vram.chunks_exact(2).take(VIDEO_WIDTH * VIDEO_HEIGHT).enumerate() {
           if let &[high_byte, low_byte] = slice {
-            let color = (low_byte as u16) + ((high_byte as u16) << 8);
+            let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
             Self::fill_output_color(&mut self.output_texture[..], idx, color);
           }
         }
@@ -601,13 +624,14 @@ impl GBA {
           .enumerate()
         {
           let palette_idx = (*palette_idx as usize) * 2;
-          let color = (self.palette_ram[palette_idx] as u16)
-            + ((self.palette_ram[palette_idx + 1] as u16) << 8);
+          let color = u16::from(self.palette_ram[palette_idx])
+            + (u16::from(self.palette_ram[palette_idx + 1]) << 8);
           Self::fill_output_color(&mut self.output_texture[..], idx, color);
         }
       }
       5 => {
         // 16 bit color bitmap. Two frame buffers (160x128 pixels, 32768 colors)
+        // TODO
         ()
       }
       _ => (),
@@ -630,6 +654,80 @@ impl GBA {
       self.set_mode(CpuMode::IRQ);
       self.regs[15] = BIOS_INTERRUPT_HANDLER;
     }
+  }
+
+  pub(crate) fn do_dma(&mut self, base_addr: u32) {
+    let dma_num = (base_addr - 0x0400_00B0) / 0xA;
+
+    let source_addr_addr = base_addr;
+    let dest_addr_addr = base_addr + 4;
+    let count_addr = base_addr + 8;
+    let control_addr = base_addr + 10;
+
+    let mut source_addr =
+      self.fetch_u32(source_addr_addr) & if dma_num == 0 { 0x07FF_FFFF } else { 0x0FFF_FFFF };
+    let mut dest_addr =
+      self.fetch_u32(dest_addr_addr) & if dma_num == 3 { 0x0FFF_FFFF } else { 0x07FF_FFFF };
+
+    let control_flags = self.fetch_u16(control_addr);
+    let size = if (control_flags & 0x0000_0400) != 0 { 4 } else { 2 };
+
+    let count = {
+      let count = self.fetch_u16(count_addr);
+      let max_count = if dma_num == 3 { 0xFFFF } else { 0x3FFF };
+      if count == 0 { max_count } else { count & max_count }
+    };
+
+    let modifier_source: fn(&mut u32, u32) = match (control_flags >> 7) & 3 {
+      0 => |source, size| *source += size,
+      1 => |source, size| *source -= size,
+      2 => |_, _| (),
+      3 => |source, size| *source += size,
+      _ => std::panic!("Impossible"),
+    };
+    let modifier_dest: fn(&mut u32, u32) = match (control_flags >> 5) & 3 {
+      0 => |source, size| *source += size,
+      1 => |source, size| *source -= size,
+      2 => |_, _| (),
+      _ => std::panic!("Impossible"),
+    };
+
+    if let Some(f) = self.debug_print_fn {
+      f(format!(
+        "DMA source:{:x} dest:{:x} size:{} count:{} modifier_source:{} modifier_dest:{} flags:{:x}",
+        source_addr,
+        dest_addr,
+        size,
+        count,
+        (control_flags >> 7) & 3,
+        (control_flags >> 5) & 3,
+        control_flags
+      )
+      .as_str());
+    }
+
+    if size == 2 {
+      for _ in 0..count {
+        let byte = self.fetch_u16(source_addr);
+        self.write_u16(dest_addr, byte);
+        modifier_source(&mut source_addr, size);
+        modifier_dest(&mut dest_addr, size);
+      }
+    } else {
+      for _ in 0..count {
+        let byte = self.fetch_u32(source_addr);
+        self.write_u32(dest_addr, byte);
+        modifier_source(&mut source_addr, size);
+        modifier_dest(&mut dest_addr, size);
+      }
+    }
+
+    let repeat = (control_flags & 0x0200) != 0;
+    if !repeat {
+      self.write_u16(control_addr, control_flags & (!0x8000));
+    }
+
+    let irq = (control_flags & 0x4000) != 0;
   }
 
   pub fn run_forever(&mut self) -> Result<(), GBAError> {

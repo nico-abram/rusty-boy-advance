@@ -75,10 +75,7 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
 #[inline]
 pub(crate) fn check_cond(gba: &mut GBA, opcode: u32) -> bool {
   let applies = match opcode_to_cond(opcode) {
-    Cond::EQ => {
-      gba.debug_print_fn.map(|f| f(format!("eq zero:{}", gba.cpsr.zero_flag()).as_str()));
-      gba.cpsr.zero_flag()
-    }
+    Cond::EQ => gba.cpsr.zero_flag(),
     Cond::NE => !gba.cpsr.zero_flag(),
     Cond::CS_HS => gba.cpsr.carry_flag(),
     Cond::CC_LO => !gba.cpsr.carry_flag(),
@@ -340,24 +337,15 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     gba.regs[rd] = match opcode {
       1 => {
         // Load Unsigned halfword (zero-extended)
-        gba.debug_print_fn.map(|f| {
-          f(format!(
-            "loading Load Unsigned halfword (zero-extended) addr:{:x} va:{:x} extended:{:x}\n",
-            addr,
-            gba.fetch_u16(addr),
-            gba.fetch_u16(addr) as u32
-          )
-          .as_str())
-        });
-        gba.fetch_u16(addr) as u32
+        u32::from(gba.fetch_u16(addr))
       }
       2 => {
         // Load Signed byte (sign extended)
-        gba.fetch_byte(addr) as i8 as i32 as u32
+        i32::from(gba.fetch_byte(addr) as i8) as u32
       }
       3 => {
         // Load Signed halfword (sign extended)
-        gba.fetch_u16(addr) as i16 as i32 as u32
+        i32::from(gba.fetch_u16(addr) as i16)as u32
       }
       0 => core::panic!(
         "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
@@ -368,13 +356,6 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     match opcode {
       1 => {
         // Store halfword
-        gba.debug_print_fn.map(|f| {
-          f(format!(
-            "storing halfword addr:{:x} value:{:x} extended:{:x}\n",
-            addr, gba.regs[rd], gba.regs[rd] as u16
-          )
-          .as_str())
-        });
         gba.write_u16(addr, gba.regs[rd] as u16);
       }
       2 => {
@@ -480,14 +461,8 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let rlists = [rlist1, rlist2];
   let is_psr = psr_or_user_mode && is_load_else_store && ((rlist2 & 0x80) != 0);
 
-          gba.print_fn.map(|f| {
-            f(format!(
-              "psr_or_user_mode:{} is_psr:{}",
-              psr_or_user_mode, is_psr
-            )
-            .as_str())
-          });
-  let get_mut_reg: fn(&mut GBA, usize) -> &mut u32 = if psr_or_user_mode && !is_psr {
+  type MutRegGetter = fn(&mut GBA, usize) -> &mut u32;
+  let get_mut_reg: MutRegGetter = if psr_or_user_mode && !is_psr {
     // http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0489g/Cihcadda.html says
     // "You must not use it in User mode or System mode.". How strict is that requirement?
     if gba.cpsr.mode() == CpuMode::User {
@@ -524,33 +499,33 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   };
 
   let is_push = !is_load_else_store;
-  let push_or_pop_operation: fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, u32) = if is_push {
-    |gba, get_mut_reg, reg, sp|{ let val = *get_mut_reg(gba, reg); gba.write_u32(sp, val) }
+  type PushPopOp = fn(&mut GBA, MutRegGetter, usize, u32);
+  let push_or_pop_operation: PushPopOp = if is_push {
+    |gba, get_mut_reg, reg, sp| {
+      let val = *get_mut_reg(gba, reg);
+      gba.write_u32(sp, val)
+    }
   } else {
     |gba, get_mut_reg, reg, sp| *get_mut_reg(gba, reg) = gba.fetch_u32(sp)
   };
 
-  let operation: fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, &mut u32, fn(&mut GBA, fn(&mut GBA, usize) -> &mut u32, usize, u32), fn(&mut u32)) =
-    if is_pre_offseted {
-      |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
-        offseting_operation(sp);
-        push_or_pop_operation(gba, get_mut_reg, reg, *sp);
-      }
-    } else {
-      |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
-        push_or_pop_operation(gba, get_mut_reg, reg, *sp);
-        offseting_operation(sp);
-      }
-    };
+  type Operation = fn(&mut GBA, MutRegGetter, usize, &mut u32, PushPopOp, fn(&mut u32));
+  let operation: Operation = if is_pre_offseted {
+    |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
+      offseting_operation(sp);
+      push_or_pop_operation(gba, get_mut_reg, reg, *sp);
+    }
+  } else {
+    |gba, get_mut_reg, reg, sp, push_or_pop_operation, offseting_operation| {
+      push_or_pop_operation(gba, get_mut_reg, reg, *sp);
+      offseting_operation(sp);
+    }
+  };
 
   let mut sp = *get_mut_reg(gba, rn);
   let mut sp_was_last_modified_reg = false;
   let mut n = 0;
 
-  gba.print_fn.map(|f| {
-    f(format!("is_up :{} is_pre_offseted:{} is_push:{} sp:{}", is_up, is_pre_offseted, is_push, rn)
-      .as_str())
-  });
   // IntoIterator is not implemented for arrays (https://github.com/rust-lang/rust/issues/25725)
   // So we use regular fors (For now)
   if is_up {
@@ -560,17 +535,17 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
           n += 1;
           let bit_number = byte_number * 8 + bit_in_byte;
 
-          gba.print_fn.map(|f| {
-            f(format!(
-              "no rev doing reg:{} n:{} sp_was_last_modified_reg:{}",
-              bit_number, n, sp_was_last_modified_reg
-            )
-            .as_str())
-          });
           let is_sp = bit_number == rn;
           sp_was_last_modified_reg = is_sp;
 
-          operation(gba, get_mut_reg, bit_number, &mut sp, push_or_pop_operation, offseting_operation);
+          operation(
+            gba,
+            get_mut_reg,
+            bit_number,
+            &mut sp,
+            push_or_pop_operation,
+            offseting_operation,
+          );
         }
       }
     }
@@ -581,35 +556,27 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
           n += 1;
           let bit_number = byte_number * 8 + bit_in_byte;
 
-          gba.print_fn.map(|f| {
-            f(format!(
-              "doing reg:{} n:{} sp_was_last_modified_reg:{}",
-              bit_number, n, sp_was_last_modified_reg
-            )
-            .as_str())
-          });
           let is_sp = bit_number == rn;
           if is_sp {
             sp_was_last_modified_reg = n == 1;
           }
 
-          operation(gba, get_mut_reg, bit_number, &mut sp, push_or_pop_operation, offseting_operation);
+          operation(
+            gba,
+            get_mut_reg,
+            bit_number,
+            &mut sp,
+            push_or_pop_operation,
+            offseting_operation,
+          );
         }
       }
     }
   }
 
-  gba.print_fn.map(|f| {
-    f(format!(
-      "write_back :{} is_load_else_store:{} sp_was_last_modified_reg:{}",
-      write_back, is_load_else_store, sp_was_last_modified_reg
-    )
-    .as_str())
-  });
   // Load & sp in rlist => dont write
   // store & sp last reg modified => dont write
   if write_back && !sp_was_last_modified_reg {
-    gba.print_fn.map(|f| f(format!("writing back:{:x}", sp).as_str()));
     *get_mut_reg(gba, rn) = sp;
   }
 
@@ -794,7 +761,7 @@ fn alu_operation(gba: &mut GBA, opcode: u32) -> ARMResult {
     }
     4 => {
       //add
-      let (result, overflow) = op2.overflowing_add(rn);
+      let (result, _overflow) = op2.overflowing_add(rn);
       *res = result;
       set_all_flags(
         result,
