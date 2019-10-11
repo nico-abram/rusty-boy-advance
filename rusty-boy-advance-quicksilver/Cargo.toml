@@ -18,4 +18,4 @@ rusty-boy-advance = { path = "../rusty-boy-advance" }
 quicksilver = "0.3.19"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-stdweb = "0.4.19"
+stdweb = "0.4.20"
