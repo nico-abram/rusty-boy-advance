@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "quicksilver"
-version = "0.3.19"
+version = "0.3.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2114,7 +2114,7 @@ dependencies = [
 name = "rusty-boy-advance-quicksilver"
 version = "0.0.2"
 dependencies = [
- "quicksilver 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "quicksilver 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
  "rusty-boy-advance 0.0.4",
  "stdweb 0.4.19 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -3070,7 +3070,7 @@ dependencies = [
 "checksum proc-macro2 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "cd07deb3c6d1d9ff827999c7f9b04cdfd66b1b17ae508e14fe47b620f2282ae0"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
 "checksum proc-macro2 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "afdc77cc74ec70ed262262942ebb7dac3d479e9e5cfa2da1841c0806f6cdabcc"
-"checksum quicksilver 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)" = "9a3176b98680d405365b252d7c06d3efa9d1e8664dd0ddaf78f93850b98a3113"
+"checksum quicksilver 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)" = "f2885bb43f7ff912ad5a9fa404bbbec2c48e6762c2d85d50de05378c8c3d802c"
 "checksum quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)" = "7a6e920b65c65f10b2ae65c831a81a073a89edd28c7cce89475bff467ab4167a"
 "checksum quote 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1eca14c727ad12702eb4b6bfb5a232287dcf8385cb8ca83a3eeaf6519c44c408"
 "checksum quote 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)" = "faf4799c5d274f3868a4aae320a0a182cbd2baee377b378f080e16a23e9d80db"
