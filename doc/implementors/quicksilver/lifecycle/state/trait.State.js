@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["rusty_boy_advance_quicksilver"] = [{"text":"impl <a class=\"trait\" href=\"https://docs.rs/quicksilver/0.3.20/quicksilver/quicksilver/lifecycle/state/trait.State.html\" title=\"trait quicksilver::lifecycle::state::State\">State</a> for <a class=\"struct\" href=\"rusty_boy_advance_quicksilver/struct.GameState.html\" title=\"struct rusty_boy_advance_quicksilver::GameState\">GameState</a>","synthetic":false,"types":["rusty_boy_advance_quicksilver::GameState"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
