@@ -714,11 +714,11 @@ impl GBA {
                 px_y_within_tile = 7 - px_y_within_tile;
               };
 
-              let (px_x_idx, overflows) = ((px_x_within_tile + screen_tile_x * 8) as usize)
+              let (px_x_idx, overflows_x) = ((px_x_within_tile + screen_tile_x * 8) as usize)
                 .overflowing_sub(leftover_x_pxs_from_scroll as usize);
-              let (px_y_idx, overflows) = ((px_y_within_tile + screen_tile_y * 8) as usize)
+              let (px_y_idx, overflows_y) = ((px_y_within_tile + screen_tile_y * 8) as usize)
                 .overflowing_sub(leftover_y_pxs_from_scroll as usize);
-              if overflows {
+              if overflows_x || overflows_y {
                 continue;
               }
 

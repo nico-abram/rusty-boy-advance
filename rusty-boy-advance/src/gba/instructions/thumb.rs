@@ -477,13 +477,13 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
   gba.regs[rd] = if is_halfword {
     // Half-word(16 bits)
     if sign_extend {
-      (i32::from(gba.fetch_u16(addr) as i16) as u32) // Sign extend
+      i32::from(gba.fetch_u16(addr) as i16) as u32 // Sign extend
     } else {
       // zero extend
       u32::from(gba.fetch_u16(addr))
     }
   } else {
-    (i32::from(gba.fetch_byte(addr) as i8) as u32) // Sign extend
+    i32::from(gba.fetch_byte(addr) as i8) as u32 // Sign extend
   };
 
   gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle();

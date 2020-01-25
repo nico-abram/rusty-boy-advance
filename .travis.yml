@@ -54,6 +54,12 @@ script:
   - rustup default nightly
   - rustup update
   - |
+    if [ $ARCH == "x86_64-pc-windows-msvc" ]; then
+      rustup default nightly-msvc;
+      rustup set default-host x86_64-pc-windows-msvc;
+      echo "ok";
+    fi
+  - |
     if [ $ARCH == "wasm" ]; then
       export DO_DEPLOY="yes";
     else
@@ -65,8 +71,9 @@ script:
     fi
 
 deploy:
+  cleanup: false
+  skip_cleanup: true
   provider: pages
-  skip-cleanup: true
   github-token: $GITHUB_TOKEN
   keep-history: false
   local-dir: public
@@ -74,10 +81,13 @@ deploy:
     branch: master
     condition: $DO_DEPLOY = yes
 
+#https://github.com/koute/cargo-web/issues/227
 before_deploy:
-  - cargo install cargo-web
+  - ./.ci/dl-cargo-web.sh
+  - cd rusty-boy-advance-quicksilver 
   - cargo web deploy -p rusty-boy-advance-quicksilver --release
   - cargo doc --document-private-items --no-deps
+  - cd ..
   - mkdir public
   - cp -r target/doc/ public/
   - cp -r target/deploy/. public/
