@@ -64,32 +64,27 @@ fn move_shifted_register(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let offset = as_bits_6_to_10(opcode);
   let operand = gba.regs[rs];
 
-  let res = if offset == 0 {
-    super::arm::special_shift_by_zero(gba, operation as u8, operand).0
+  let (res, carry) = if offset == 0 {
+    super::arm::special_shift_by_zero(gba, operation as u8, operand)
   } else {
-    match operation {
-      0 => operand << offset,
-      1 => operand >> offset,
-      2 => ((operand as i32) >> offset) as u32,
-      3 => unimplemented!("reserved"),
-      _ => unreachable!(), // We're matching on 2 bits
-    }
-  };
-  gba.regs[rd] = res;
-
-  gba.cpsr.set_all_status_flags(
-    res,
-    if offset == 0 && operation == 0 {
-      None
-    } else {
+    (
+      match operation {
+        0 => operand << offset,
+        1 => operand >> offset,
+        2 => ((operand as i32) >> offset) as u32,
+        3 => unimplemented!("reserved"),
+        _ => std::unreachable!(), // We're matching on 2 bits
+      },
       Some(match operation {
         0 => ((operand >> (32 - offset)) & 1) != 0,
         1 | 2 => ((operand >> (offset - 1)) & 1) != 0,
-        _ => unreachable!(), // We crashed in the match above if we arent 0,1 or 2 already
-      })
-    },
-    None,
-  );
+        _ => std::unreachable!(), // We're matching on 2 bits
+      }),
+    )
+  };
+  gba.regs[rd] = res;
+
+  gba.cpsr.set_all_status_flags(res, carry, None);
 
   gba.clocks += gba.sequential_cycle();
 
@@ -170,7 +165,7 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
       res
     }
-    _ => unreachable!(), // It's 2 bits
+    _ => std::unreachable!(), // It's 2 bits
   };
 
   gba.clocks += gba.sequential_cycle();
@@ -414,7 +409,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       }
       gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
     }
-    _ => unreachable!(), // It's 2 bits
+    _ => std::unreachable!(), // It's 2 bits
   }
 
   Ok(())

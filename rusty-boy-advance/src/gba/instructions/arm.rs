@@ -67,7 +67,7 @@ pub(crate) fn opcode_to_cond(opcode: u32) -> Cond {
     0xD => Cond::LE,
     0xE => Cond::AL,
     0xF => Cond::NV,
-    _ => unreachable!(), // We're matching on 4 bits
+    _ => std::unreachable!(), // We're matching on 4 bits
   }
 }
 
@@ -345,12 +345,12 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
       }
       3 => {
         // Load Signed halfword (sign extended)
-        i32::from(gba.fetch_u16(addr) as i16)as u32
+        i32::from(gba.fetch_u16(addr) as i16) as u32
       }
       0 => core::panic!(
         "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
       ),
-      _ => unreachable!(), // It's 2 bits
+      _ => std::unreachable!(), // It's 2 bits
     };
   } else {
     match opcode {
@@ -370,9 +370,9 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
       }
       0 => {
         // Reserved for SWP. Unreachable (Ensure we match SWP before this in decoding)
-        unreachable!()
+        std::unreachable!()
       }
-      _ => unreachable!(), // It's 2 bits
+      _ => std::unreachable!(), // It's 2 bits
     }
   }
 

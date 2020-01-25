@@ -24,7 +24,14 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 const VIDEO_HEIGHT: usize = 160;
 const VIDEO_WIDTH: usize = 240;
 
+/// See [`GBAButton`].bit for button->bit mappings
 const KEY_STATUS_REG: u32 = 0x0400_0130;
+/// Display control (http://problemkaputt.de/gbatek.htm#lcdiodisplaycontrol)
+const DISPCNT_ADDR: u32 = 0x0400_0000;
+/// Display status (http://problemkaputt.de/gbatek.htm#lcdiointerruptsandstatus)
+const DISPSTAT_ADDR: u32 = 0x0400_0004;
+/// Scanline(Vertical) counter (http://problemkaputt.de/gbatek.htm#lcdiointerruptsandstatus)
+const VCOUNT_ADDR: u32 = 0x0400_0006;
 
 // Numbers taken from https://rust-console.github.io/gba/io-registers.html#vcount-vertical-display-counter
 const NUM_VIRTUAL_HORIZONTAL_PIXELS: u16 = 68;
@@ -36,6 +43,21 @@ const NUM_VIRTUAL_SCANLINES: u16 = 68;
 const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
 const NUM_SCANLINES: u16 = NUM_REAL_SCANLINES + NUM_VIRTUAL_SCANLINES;
 const CLOCKS_PER_FRAME: u32 = (NUM_SCANLINES as u32) * CLOCKS_PER_SCANLINE;
+
+const VBLANK_IE_BIT: u32 = 0;
+const HBLANK_IE_BIT: u32 = 1;
+const VCOUNTER_IE_BIT: u32 = 2;
+const TIMER0_IE_BIT: u32 = 3;
+const TIMER1_IE_BIT: u32 = 4;
+const TIMER2_IE_BIT: u32 = 5;
+const TIMER3_IE_BIT: u32 = 6;
+const SERIAL_IE_BIT: u32 = 7;
+const DMA0_IE_BIT: u32 = 8;
+const DMA1_IE_BIT: u32 = 9;
+const DMA2_IE_BIT: u32 = 10;
+const DMA3_IE_BIT: u32 = 11;
+const KEYPAD_IE_BIT: u32 = 12;
+const GAMEPAK_IE_BIT: u32 = 13;
 
 #[derive(Debug, Copy, Clone)]
 pub enum GBAButton {
@@ -151,23 +173,23 @@ impl GBA {
     print_fn: Option<fn(&str) -> ()>,
   ) -> Box<Self> {
     // Was still getting stack overflows without Box X
-    let mut gba = box GBA {
-      output_texture: [0x00u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
-      regs: [0u32; 16],
-      fiq_only_banks: [[0u32; 5]; 2],
-      all_modes_banks: [[0u32; 2]; 6],
-      spsrs: [CPSR(0u32); 5],
-      cpsr: CPSR(0u32),
-      bios_rom: [0u8; 16 * KB],
-      wram_board: [0u8; 256 * KB],
-      wram_chip: [0u8; 32 * KB],
-      palette_ram: [0u8; KB],
-      vram: [0u8; 96 * KB],
-      oam: [0u8; KB],
-      io_mem: [0u8; 1022],
-      game_pak: box [0u8; 32 * MB],
-      game_pak_sram: [0u8; 64 * KB],
-      clocks: 0u32,
+    let mut gba = box Self {
+      output_texture: [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
+      regs: [0_u32; 16],
+      fiq_only_banks: [[0_u32; 5]; 2],
+      all_modes_banks: [[0_u32; 2]; 6],
+      spsrs: [CPSR(0_u32); 5],
+      cpsr: CPSR(0_u32),
+      bios_rom: [0_u8; 16 * KB],
+      wram_board: [0_u8; 256 * KB],
+      wram_chip: [0_u8; 32 * KB],
+      palette_ram: [0_u8; KB],
+      vram: [0_u8; 96 * KB],
+      oam: [0_u8; KB],
+      io_mem: [0_u8; 1022],
+      game_pak: box [0_u8; 32 * MB],
+      game_pak_sram: [0_u8; 64 * KB],
+      clocks: 0_u32,
       loaded_rom: None,
       instruction_hook: None,
       instruction_hook_with_opcode: None,
@@ -282,9 +304,9 @@ impl GBA {
       0x05 => self.palette_ram[(addr & 0x0000_03FF) as usize],
       // VRAM - Video RAM          (96 KBytes)
       //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
-      0x06 => self.vram[(addr & 0x0001_7FFF) as usize],
+      0x06 => self.vram[(addr & 0x00FF_FFFF) as usize],
       // OAM - OBJ Attributes      (1 Kbyte)
-      0x07 => self.oam[(addr & 0x00FF_FFFF) as usize],
+      0x07 => self.oam[(addr & 0x0000_03FF) as usize],
       // External Memory (Game Pak)
       // TODO: Wait states
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 0
@@ -296,7 +318,7 @@ impl GBA {
       // Out of bounds ROM access (Behaviour taken from MGBA)
       0x0B | 0x0D | 0x09 => self.game_pak[(addr & 0x01FF_FFFF) as usize],
       // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width (TODO)
-      _ => 0u8, //  unimplemented!("Invalid address: {:x}", addr)
+      _ => 0_u8, //  unimplemented!("Invalid address: {:x}", addr)
     }
   }
 
@@ -424,24 +446,24 @@ impl GBA {
   pub fn reset(&mut self) {
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
-    self.output_texture = [0x00u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
-    self.fiq_only_banks = [[0u32; 5]; 2];
-    self.all_modes_banks = [[0u32; 2]; 6];
-    self.io_mem = [0u8; 1022];
+    self.output_texture = [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
+    self.fiq_only_banks = [[0_u32; 5]; 2];
+    self.all_modes_banks = [[0_u32; 2]; 6];
+    self.io_mem = [0_u8; 1022];
     self.write_u32(0x0400_0088, 0x200);
     self.spsrs = [CPSR(0x0000_001F); 5];
     self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x0300_7FA0;
     self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x0300_7FE0;
     self.cpsr = CPSR(0x0000_001F);
     self.set_mode(CpuMode::Privileged);
-    self.wram_board = [0u8; 256 * KB];
-    self.wram_chip = [0u8; 32 * KB];
-    self.palette_ram = [0u8; KB];
-    self.vram = [0u8; 96 * KB];
-    self.oam = [0u8; KB];
-    self.game_pak = box [0u8; 32 * MB];
-    self.game_pak_sram = [0u8; 64 * KB];
-    self.clocks = 0u32;
+    self.wram_board = [0_u8; 256 * KB];
+    self.wram_chip = [0_u8; 32 * KB];
+    self.palette_ram = [0_u8; KB];
+    self.vram = [0_u8; 96 * KB];
+    self.oam = [0_u8; KB];
+    self.game_pak = box [0_u8; 32 * MB];
+    self.game_pak_sram = [0_u8; 64 * KB];
+    self.clocks = 0_u32;
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
     self.regs[13] = 0x0300_7F00; // Taken from mgba
     self.regs[15] = RESET_HANDLER;
@@ -542,8 +564,6 @@ impl GBA {
     let hblank = column_offset >= NUM_REAL_HORIZONTAL_PIXELS;
     let vblank = row_offset >= NUM_REAL_SCANLINES;
 
-    const HBLANK_IE_BIT: u32 = 1;
-    const VBLANK_IE_BIT: u32 = 0;
     if column_offset == NUM_HORIZONTAL_PIXELS {
       self.trigger_interrupt_if_enabled(HBLANK_IE_BIT);
     }
@@ -551,19 +571,23 @@ impl GBA {
       self.trigger_interrupt_if_enabled(VBLANK_IE_BIT);
     }
 
-    let prev_status = self.fetch_u16(0x0400_0004);
-    //let prev_vcount = self.fetch_u16(0x0400_0006);
+    let prev_status = self.fetch_u16(DISPSTAT_ADDR); // DIPSTAT in gbatek
+    let _prev_vcount = self.fetch_u16(VCOUNT_ADDR);
 
     let vcount_setting = (prev_status & 0xFF00) >> 8;
     let vcounter_flag = vcount_setting == row_offset;
+
+    if vcounter_flag {
+      self.trigger_interrupt_if_enabled(VCOUNTER_IE_BIT);
+    }
 
     let new_status = (prev_status & 0b1111_1111_1111_1000)
       | if vcounter_flag { 1 << 2 } else { 0 }
       | if hblank { 1 << 1 } else { 0 }
       | if vblank { 1 } else { 0 };
 
-    self.write_u16(0x0400_0006, row_offset & 0xFF);
-    self.write_u16(0x0400_0004, new_status);
+    self.write_u16(VCOUNT_ADDR, row_offset & 0xFF); // Write VCOUNT
+    self.write_u16(DISPSTAT_ADDR, new_status); // Write DIPSTAT
   }
 
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
@@ -583,24 +607,166 @@ impl GBA {
   /// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
   /// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
   #[allow(clippy::identity_op)]
+  #[allow(clippy::redundant_closure_call)]
   #[inline]
   fn fill_output_color(output_texture: &mut [u8], idx: usize, color: u16) {
-    let r = ((color & 0x001F) >> 0) as u8;
-    let g = ((color & 0x03E0) >> 5) as u8;
-    let b = ((color & 0xFC00) >> 10) as u8;
+    let r = ((color >> 0) & 0x001F) as u8;
+    let g = ((color >> 5) & 0x001F) as u8;
+    let b = ((color >> 10) & 0x001F) as u8;
 
-    output_texture[(idx * 3) + 0] = (core::cmp::max(r, 14) - 14).overflowing_mul(15).0;
-    output_texture[(idx * 3) + 1] = (core::cmp::max(g, 14) - 14).overflowing_mul(15).0;
-    output_texture[(idx * 3) + 2] = (core::cmp::max(b, 14) - 14).overflowing_mul(15).0;
+    let col5_to_col8 = |x| (x << 3) | (x >> 2);
+    output_texture[(idx * 3) + 0] = col5_to_col8(r);
+    output_texture[(idx * 3) + 1] = col5_to_col8(g);
+    output_texture[(idx * 3) + 2] = col5_to_col8(b);
   }
 
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
   #[allow(clippy::unused_unit)]
   pub(crate) fn update_video_output(&mut self) {
-    let bg_mode = self.io_mem[0] & 0x0000_0007;
+    let display_control = self.fetch_u16(DISPCNT_ADDR);
+    let bg_mode = display_control & 0x0000_0007;
     match bg_mode {
-      0 => (),
+      0 => {
+        const TILE_WIDTH: u32 = 8;
+        const TILE_HEIGHT: u32 = 8;
+
+        let (scroll_x, scroll_y) = (
+          (self.fetch_u16(0x0400_0010) & 0x1FF) as u32,
+          (self.fetch_u16(0x0400_0012) & 0x1FF) as u32,
+        );
+        let (bg_first_tile_x, bg_first_tile_y) = (scroll_x / 8, scroll_y / 8);
+        let (leftover_x_pxs_from_scroll, leftover_y_pxs_from_scroll) =
+          (scroll_x % 8, (scroll_y % 8));
+
+        let bg_0_control_flags = self.fetch_u16(0x0400_0008); // BG0CNT in gbatek
+
+        // The tile data contains colours, format depends on full palette
+        // (1 byte per colour) or not (4 bits a colour)
+        const TILE_DATA_PAGE_SIZE: u32 = 16 * 1024;
+        let tile_data_page = u32::from((bg_0_control_flags >> 2) & 0x3);
+        let tile_data_base_addr = 0x0600_0000 + tile_data_page * TILE_DATA_PAGE_SIZE;
+
+        // The tilemap contains the attributes for the tile(Like being flipped)
+        // and the tile index into the tile data
+        const TILE_MAP_PAGE_SIZE: u32 = 2 * 1024;
+        let tile_map_page = u32::from((bg_0_control_flags >> 8) & 0x1F);
+        let tile_map_base_addr = 0x0600_0000 + tile_map_page * TILE_MAP_PAGE_SIZE;
+
+        let full_palette = (bg_0_control_flags & 0x0000_0080) != 0;
+        let screen_size_flag = ((bg_0_control_flags >> 14) & 0x3) as usize;
+        let (bg_x_tile_count, bg_y_tile_count) = match screen_size_flag {
+          0 => (32, 32),
+          1 => (64, 32),
+          2 => (32, 64),
+          3 => (64, 64),
+          _ => std::unreachable!(),
+        };
+
+        let bytes_per_tile =
+          if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) };
+        let draw_tile = |gba: &mut GBA, bg_tile_x, bg_tile_y, screen_tile_x, screen_tile_y| {
+          // The math here is pretty weird. The way the tiles are laid out in memory seems to be
+          // the first (top-left) 32x32 tiles, then the bottom-left 32x32, then top-right
+          // then bottom-right
+          let tile_map_element_addr = tile_map_base_addr
+            + (((bg_tile_x & 0x1F) + bg_tile_y * bg_y_tile_count) * 2)
+            + if bg_tile_x >= 32 { 32 * bg_y_tile_count * 2 } else { 0 };
+
+          // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
+          let tile_map_element = u32::from(gba.fetch_u16(tile_map_element_addr));
+
+          let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x1FF });
+          let tile_addr = 0x0600_0000 + tile_number * bytes_per_tile;
+
+          let h_flip = (tile_map_element & 0x0000_0400) != 0;
+          let v_flip = (tile_map_element & 0x0000_0800) != 0;
+
+          if full_palette {
+            // 1 byte per pixel
+            for i in 0..64 {
+              let palette_idx = gba.fetch_byte(tile_data_base_addr + tile_number + i) as usize;
+              let color = u16::from(gba.palette_ram[palette_idx])
+                + (u16::from(gba.palette_ram[palette_idx + 1]) << 8);
+              let px_idx = (screen_tile_x * 8
+                + (screen_tile_y * bg_x_tile_count * 8)
+                + (i % 8)
+                + (i / 8) * bg_x_tile_count * 8) as usize;
+              if px_idx < (&gba.output_texture[..]).len() {
+                Self::fill_output_color(&mut gba.output_texture[..], px_idx, color);
+              }
+            }
+          } else {
+            // 4 bits per pixel
+            let palette_base = {
+              let palette_number = (tile_map_element >> 12) & 0xF;
+              // Each sub palette has 16 colors of 2 bytes each
+              (palette_number * 16 * 2) as usize
+            };
+            for i in 0..32u32 {
+              let (mut px_x_within_tile, mut px_y_within_tile) = ((i & 0x3) * 2, (i >> 2));
+
+              // TODO: Things seem to be wrong when moving along both ways mid-tile when flipping?
+              if h_flip {
+                px_x_within_tile = 7 - px_x_within_tile;
+              };
+              if v_flip {
+                px_y_within_tile = 7 - px_y_within_tile;
+              };
+
+              let (px_x_idx, overflows) = ((px_x_within_tile + screen_tile_x * 8) as usize)
+                .overflowing_sub(leftover_x_pxs_from_scroll as usize);
+              let (px_y_idx, overflows) = ((px_y_within_tile + screen_tile_y * 8) as usize)
+                .overflowing_sub(leftover_y_pxs_from_scroll as usize);
+              if overflows {
+                continue;
+              }
+
+              if px_y_idx >= VIDEO_HEIGHT {
+                continue;
+              }
+
+              // First 4 bits are the first px's palette idx, next 4 are the next color's
+              let (palette_idx1, palette_idx2) = {
+                let palette_idxs = gba.fetch_byte(tile_addr + i) as usize;
+                #[allow(clippy::identity_op)]
+                ((palette_idxs >> 0) & 0xF, (palette_idxs >> 4) & 0xF)
+              };
+
+              if px_x_idx < VIDEO_WIDTH {
+                let px_idx1 = px_x_idx.wrapping_add(px_y_idx * VIDEO_WIDTH);
+                let palette_idx1 = palette_base + (palette_idx1 * 2);
+
+                let color = u16::from(gba.palette_ram[palette_idx1])
+                  + (u16::from(gba.palette_ram[palette_idx1 + 1]) << 8);
+                Self::fill_output_color(&mut gba.output_texture[..], px_idx1, color);
+              }
+              if if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) } < VIDEO_WIDTH {
+                let px_idx2 = (if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) })
+                  .wrapping_add(px_y_idx * VIDEO_WIDTH);
+                let palette_idx2 = palette_base + (palette_idx2 * 2);
+                let color = u16::from(gba.palette_ram[palette_idx2])
+                  + (u16::from(gba.palette_ram[palette_idx2 + 1]) << 8);
+                Self::fill_output_color(&mut gba.output_texture[..], px_idx2, color);
+              }
+            }
+          }
+        };
+        const SCREEN_Y_TILE_COUNT: u32 = ((VIDEO_HEIGHT as u32) / TILE_HEIGHT);
+        const SCREEN_X_TILE_COUNT: u32 = ((VIDEO_WIDTH as u32) / TILE_WIDTH);
+        // We use an extra one for the case were we are mid-scroll and are displaying N+1 tiles
+        for y in 0..=SCREEN_Y_TILE_COUNT {
+          for x in 0..=SCREEN_X_TILE_COUNT {
+            draw_tile(
+              self,
+              (bg_first_tile_x + x) % bg_x_tile_count,
+              (bg_first_tile_y + y) % bg_y_tile_count,
+              x,
+              y,
+            );
+          }
+        }
+      }
       1 => (),
       2 => (),
       3 => {
@@ -631,8 +797,34 @@ impl GBA {
       }
       5 => {
         // 16 bit color bitmap. Two frame buffers (160x128 pixels, 32768 colors)
-        // TODO
-        ()
+        const BGMODE5_WIDTH: usize = 160;
+        const BGMODE5_HEIGHT: usize = 128;
+        const BGMODE5_FRAMEBUFFER_PX_COUNT: usize = BGMODE5_WIDTH * BGMODE5_HEIGHT;
+        const BGMODE5_FIRST_X_PX: usize = (VIDEO_WIDTH - BGMODE5_WIDTH) / 2;
+        const BGMODE5_FIRST_Y_PX: usize = (VIDEO_HEIGHT - BGMODE5_HEIGHT) / 2;
+        let second_frame = (self.io_mem[0] & 0x0000_0008) != 0; // TODO: Is this right?
+        let mut iter = self
+          .vram
+          .chunks_exact(2)
+          .skip(if second_frame { BGMODE5_FRAMEBUFFER_PX_COUNT } else { 0 })
+          .take(BGMODE5_FRAMEBUFFER_PX_COUNT);
+        for x in 0..VIDEO_WIDTH {
+          for y in 0..VIDEO_HEIGHT {
+            let idx = x + y * VIDEO_WIDTH;
+            if x < BGMODE5_FIRST_X_PX
+              || x > BGMODE5_FIRST_X_PX + BGMODE5_WIDTH
+              || y < BGMODE5_FIRST_Y_PX
+              || y > BGMODE5_FIRST_Y_PX + BGMODE5_HEIGHT
+            {
+              // TODO: Is this right?
+              Self::fill_output_color(&mut self.output_texture[..], idx, u16::max_value());
+            } else if let &[high_byte, low_byte] = iter.next().unwrap() {
+              // TODO: Is this right?
+              let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
+              Self::fill_output_color(&mut self.output_texture[..], idx, color);
+            }
+          }
+        }
       }
       _ => (),
     }

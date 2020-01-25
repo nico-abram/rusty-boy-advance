@@ -1,6 +1,7 @@
 #![feature(box_syntax)]
 #![feature(test)]
 #![no_std]
+//#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 
 extern crate alloc;
 #[cfg(feature = "std")]

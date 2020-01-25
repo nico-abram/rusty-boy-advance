@@ -1,27 +1,30 @@
 use super::cpu_mode::CpuMode;
 
 /// The CPSR register contains the status flags (Like carry, overfllow, and zero)
-/// , the execution mode (Thumb or Arm) and the cpu mode/priviledges (See [CpuMode])
+/// , the execution mode (Thumb or Arm) and the cpu mode/priviledges (See [`CpuMode`])
 #[derive(Copy, Clone)]
 pub struct CPSR(pub(crate) u32);
 
-fn is_set(x: u32, bit: u32) -> bool {
-  (x & bit) == bit
+/// Find out if the bitmask is all one (set) bits
+const fn is_set(x: u32, bitmask: u32) -> bool {
+  (x & bitmask) == bitmask
 }
 
 #[inline]
-pub(crate) fn carry_from(op1: u32, op2: u32, res: u32) -> bool {
+/// Find out if there's a carry
+pub(crate) const fn carry_from(op1: u32, op2: u32, res: u32) -> bool {
   ((op1 >> 31) + (op2 >> 31)) > (res >> 31)
 }
 
 #[inline]
-pub(crate) fn borrow_from(positive: u32, negative: u32) -> bool {
+/// Find out if there's a borrow
+pub(crate) const fn borrow_from(positive: u32, negative: u32) -> bool {
   positive >= negative
 }
 
 impl CPSR {
   #[inline]
-  fn is_set(self, bit: u32) -> bool {
+  const fn is_set(self, bit: u32) -> bool {
     is_set(self.0, bit)
   }
 
@@ -32,7 +35,7 @@ impl CPSR {
 
   /// Sign(Negative) (N)
   #[inline]
-  pub fn negative_flag(self) -> bool {
+  pub const fn negative_flag(self) -> bool {
     self.is_set(0x8000_0000)
   }
 
@@ -44,7 +47,7 @@ impl CPSR {
 
   /// Zero (Z)
   #[inline]
-  pub fn zero_flag(self) -> bool {
+  pub const fn zero_flag(self) -> bool {
     self.is_set(0x4000_0000)
   }
 
@@ -56,7 +59,7 @@ impl CPSR {
 
   /// Carry (C)
   #[inline]
-  pub fn carry_flag(self) -> bool {
+  pub const fn carry_flag(self) -> bool {
     self.is_set(0x2000_0000)
   }
 
@@ -67,7 +70,7 @@ impl CPSR {
   }
   /// Overflow (V)
   #[inline]
-  pub fn overflow_flag(self) -> bool {
+  pub const fn overflow_flag(self) -> bool {
     self.is_set(0x1000_0000)
   }
 
@@ -79,7 +82,7 @@ impl CPSR {
 
   /// IRQ disabled (I)
   #[inline]
-  pub fn irq_disabled_flag(self) -> bool {
+  pub const fn irq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0080)
   }
 
@@ -91,7 +94,7 @@ impl CPSR {
 
   /// Fiq disabled (F)
   #[inline]
-  pub fn fiq_disabled_flag(self) -> bool {
+  pub const fn fiq_disabled_flag(self) -> bool {
     self.is_set(0x0000_0040)
   }
 
@@ -103,7 +106,7 @@ impl CPSR {
 
   /// State/Thumb (thumb=1/true)
   #[inline]
-  pub fn thumb_state_flag(self) -> bool {
+  pub const fn thumb_state_flag(self) -> bool {
     self.is_set(0x0000_0020)
   }
 
@@ -126,7 +129,7 @@ impl CPSR {
   }
 
   #[inline]
-  pub fn addition_carries(res: u32, op1: u32, op2: u32) -> bool {
+  pub const fn addition_carries(res: u32, op1: u32, op2: u32) -> bool {
     carry_from(op1, op2, res)
     /*
     ((op1 & 0x8000_0000) != 0 && (op2 & 0x8000_0000) != 0)
@@ -143,7 +146,7 @@ impl CPSR {
     op2: u32,
     overflow: Option<bool>,
   ) {
-    let carry = Some(CPSR::addition_carries(res, op1, op2));
+    let carry = Some(Self::addition_carries(res, op1, op2));
     self.set_all_status_flags(res, carry, overflow);
   }
 
