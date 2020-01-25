@@ -60,7 +60,7 @@ script:
       rustup target add $ARCH;
       cargo build --target=$ARCH;
       cargo test --target=$ARCH;
-      cargo test --target=$ARCH --lib rusty-boy-advance --no-default-features;
+      cargo test --target=$ARCH --lib rusty-boy-advance;
       cargo bench --target=$ARCH;
     fi
 
