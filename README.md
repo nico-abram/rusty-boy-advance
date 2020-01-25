@@ -20,3 +20,4 @@ I've only been working on the cpu so far. Almost all instructions are implemente
 - [This](https://hexed.it/) online hex editor
 - [This](https://github.com/Emu-Docs/Emu-Docs/blob/master/Game%20Boy%20Advance/test_roms/arm_wrestler/armwrestler.gba) cpu test rom.
 - [The MGBA blog posts](https://mgba.io/).
+- [Tonc](https://www.coranac.com/tonc/text/toc.htm). This is intended for GBA programmers, but contains useful reading material and examples, which have been useful as small ROMs for tests.
