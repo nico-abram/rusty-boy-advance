@@ -18,7 +18,7 @@ publish = false
 [dependencies]
 rusty-boy-advance = { path = "../rusty-boy-advance" }
 clap = { git = "https://github.com/clap-rs/clap", branch = "v3-master" }
-beryllium = "0.1.3"
+beryllium = "0.2.1"
 
 [target.'cfg(linux)'.dependencies.beryllium]
 version = "0.1.3"
