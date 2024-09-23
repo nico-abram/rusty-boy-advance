@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .about("GBA emulator in rust")
     .arg(
       Arg::with_name("rom")
-        .short('r')
+        .short("r")
         .long("rom")
         .value_name("ROM file")
         .help("The rom file to run")
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .arg(
       Arg::with_name("bios")
-        .short('b')
+        .short("b")
         .long("bios-file")
         .value_name("BIOS file")
         .help("If given, will use as BIOS")
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .arg(
       Arg::with_name("log-level")
-        .short('l')
+        .short("l")
         .default_value("0")
         .long("log-level")
         .value_name("Log Level")
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .arg(
       Arg::with_name("headless")
-        .short('h')
+        .short("h")
         .long("headless")
         .value_name("Headless")
         .help("If given, will run without a graphical window")
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .arg(
       Arg::with_name("frames")
-        .short('f')
+        .short("f")
         .long("frames")
         .value_name("Frames to run")
         .help("The number of frames to run before stopping (0 means none)")
@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .arg(
       Arg::with_name("instructions")
-        .short('i')
+        .short("i")
         .default_value("0")
         .long("instructions-to-run")
         .value_name("Instructions")

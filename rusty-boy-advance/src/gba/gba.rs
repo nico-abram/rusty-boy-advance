@@ -173,7 +173,7 @@ impl GBA {
     print_fn: Option<fn(&str) -> ()>,
   ) -> Box<Self> {
     // Was still getting stack overflows without Box X
-    let mut gba = box Self {
+    let mut gba = Box::new(Self {
       output_texture: [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
       regs: [0_u32; 16],
       fiq_only_banks: [[0_u32; 5]; 2],
@@ -187,7 +187,7 @@ impl GBA {
       vram: [0_u8; 96 * KB],
       oam: [0_u8; KB],
       io_mem: [0_u8; 1022],
-      game_pak: box [0_u8; 32 * MB],
+      game_pak: Box::new([0_u8; 32 * MB]),
       game_pak_sram: [0_u8; 64 * KB],
       clocks: 0_u32,
       loaded_rom: None,
@@ -197,7 +197,7 @@ impl GBA {
       print_fn,
       executed_instructions_count: 0,
       persistent_input_bitmask: 0x000,
-    };
+    });
 
     gba.reset();
 
@@ -461,7 +461,7 @@ impl GBA {
     self.palette_ram = [0_u8; KB];
     self.vram = [0_u8; 96 * KB];
     self.oam = [0_u8; KB];
-    self.game_pak = box [0_u8; 32 * MB];
+    self.game_pak = Box::new([0_u8; 32 * MB]);
     self.game_pak_sram = [0_u8; 64 * KB];
     self.clocks = 0_u32;
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
