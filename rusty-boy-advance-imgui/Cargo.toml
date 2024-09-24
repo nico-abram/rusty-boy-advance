@@ -6,7 +6,6 @@ repository = "https://github.com/nico-abram/rusty-boy-advance"
 version = "0.0.2"
 authors = ["Nicolas <abramlujan@gmail.com>"]
 edition = "2018"
-
 readme = "README.md"
 keywords = ["emulator", "gba", "game-boy"]
 categories = ["emulators"]
@@ -15,9 +14,10 @@ publish = false
 
 [dependencies]
 rusty-boy-advance = { path = "../rusty-boy-advance" }
-glium =  "0.25"
-imgui =  "0.1.0"
-imgui-glium-renderer = "0.1.0"
-imgui-winit-support = "0.1.0"
+glium = { version = "0.34.0", default-features = true }
+glutin = "0.32.1"
+imgui = { version = "0.12.0", features = ["docking", "tables-api"] }
+imgui-glium-renderer = "0.12.0"
+imgui-winit-support = "0.12.0"
 nfd = "0.0.4"
-capstone = "0.6.0"
+capstone = "0.12.0"

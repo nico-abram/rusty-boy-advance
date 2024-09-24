@@ -752,8 +752,8 @@ impl GBA {
             }
           }
         };
-        const SCREEN_Y_TILE_COUNT: u32 = ((VIDEO_HEIGHT as u32) / TILE_HEIGHT);
-        const SCREEN_X_TILE_COUNT: u32 = ((VIDEO_WIDTH as u32) / TILE_WIDTH);
+        const SCREEN_Y_TILE_COUNT: u32 = (VIDEO_HEIGHT as u32) / TILE_HEIGHT;
+        const SCREEN_X_TILE_COUNT: u32 = (VIDEO_WIDTH as u32) / TILE_WIDTH;
         // We use an extra one for the case were we are mid-scroll and are displaying N+1 tiles
         for y in 0..=SCREEN_Y_TILE_COUNT {
           for x in 0..=SCREEN_X_TILE_COUNT {
@@ -867,7 +867,11 @@ impl GBA {
     let count = {
       let count = self.fetch_u16(count_addr);
       let max_count = if dma_num == 3 { 0xFFFF } else { 0x3FFF };
-      if count == 0 { max_count } else { count & max_count }
+      if count == 0 {
+        max_count
+      } else {
+        count & max_count
+      }
     };
 
     let modifier_source: fn(&mut u32, u32) = match (control_flags >> 7) & 3 {

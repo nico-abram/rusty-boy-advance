@@ -1,19 +1,22 @@
-use glium::{
-  glutin::{self, Event, WindowEvent},
-  Display, Surface,
-};
-use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
+use glium::glutin::surface::WindowSurface;
+use glium::{Display, Surface};
+use imgui::{ConfigFlags, Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::Renderer;
+use imgui_winit_support::winit;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
+use winit::event::{ElementState, Event, WindowEvent};
+use winit::event_loop::EventLoop;
+use winit::keyboard::PhysicalKey;
+use winit::window::WindowBuilder;
 
 pub struct System {
-  pub events_loop: glutin::EventsLoop,
-  pub display: glium::Display,
+  pub event_loop: EventLoop<()>,
+  pub display: Display<WindowSurface>,
   pub imgui: Context,
   pub platform: WinitPlatform,
   pub renderer: Renderer,
-  pub font_size: f32,
+  pub window: imgui_winit_support::winit::window::Window,
 }
 
 // We can't make a const range array atm. Maybe make this less hideous
@@ -28,87 +31,153 @@ pub fn init(title: &str) -> System {
     }
     ICON_GLYPH_RANGE[256] = 0;
   }
-  let events_loop = glutin::EventsLoop::new();
-  let context = glutin::ContextBuilder::new().with_vsync(false);
-  let builder = glutin::WindowBuilder::new()
-    .with_title(title.to_owned())
-    .with_dimensions(glutin::dpi::LogicalSize::new(1024f64, 600f64));
-  let display = Display::new(builder, context, &events_loop).expect("Failed to initialize display");
+  let event_loop = EventLoop::new().expect("Failed to create EventLoop");
+  let builder: WindowBuilder =
+    WindowBuilder::new().with_maximized(true).with_title(title.to_owned());
+  let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
+    .set_window_builder(builder)
+    .build(&event_loop);
 
   let mut imgui = Context::create();
   imgui.set_ini_filename(None);
 
   let mut platform = WinitPlatform::init(&mut imgui);
-  {
-    let gl_window = display.gl_window();
-    let window = gl_window.window();
-    platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Rounded);
-  }
+  platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
 
-  let hidpi_factor = platform.hidpi_factor();
-  let font_size = (13.0 * hidpi_factor) as f32;
+  let mut icon_glyph_range = vec![0u32; 257];
+  for (idx, x) in icon_glyph_range.iter_mut().enumerate() {
+    *x = (idx + 0xe000) as u32;
+  }
+  icon_glyph_range[256] = 0;
+  //let icon_glyph_range = icon_glyph_range.align_to::<u16>();
+
+  pub const FONT_SIZE: f32 = 26.0;
+  // Fixed font size. Note imgui_winit_support uses "logical
+  // pixels", which are physical pixels scaled by the devices
+  // scaling factor. Meaning, 13.0 pixels should look the same size
+  // on two different screens, and thus we do not need to scale this
+  // value (as the scaling is handled by winit)
   imgui.fonts().add_font(&[
-    FontSource::DefaultFontData {
-      config: Some(FontConfig { size_pixels: font_size, ..FontConfig::default() }),
+    FontSource::TtfData {
+      data: include_bytes!("../resources/Roboto-Regular.ttf"),
+      size_pixels: FONT_SIZE,
+      config: Some(FontConfig {
+        // As imgui-glium-renderer isn't gamma-correct with
+        // it's font rendering, we apply an arbitrary
+        // multiplier to make the font a bit "heavier". With
+        // default imgui-glow-renderer this is unnecessary.
+        rasterizer_multiply: 1.5,
+        // Oversampling font helps improve text rendering at
+        // expense of larger font atlas texture.
+        oversample_h: 4,
+        oversample_v: 4,
+        ..FontConfig::default()
+      }),
+    },
+    FontSource::TtfData {
+      data: include_bytes!("../resources/mplus-1p-regular.ttf"),
+      size_pixels: FONT_SIZE,
+      config: Some(FontConfig {
+        // Oversampling font helps improve text rendering at
+        // expense of larger font atlas texture.
+        oversample_h: 4,
+        oversample_v: 4,
+        // Range of glyphs to rasterize
+        glyph_ranges: FontGlyphRanges::japanese(),
+        ..FontConfig::default()
+      }),
     },
     FontSource::TtfData {
       data: include_bytes!("../resources/OpenFontIcons.ttf"),
-      size_pixels: font_size,
+      size_pixels: FONT_SIZE,
       config: Some(FontConfig {
+        oversample_h: 4,
+        oversample_v: 4,
+        glyph_ranges: FontGlyphRanges::from_slice(icon_glyph_range.leak()),
         rasterizer_multiply: 1.75,
-        glyph_ranges: FontGlyphRanges::from_slice(unsafe { &ICON_GLYPH_RANGE }),
         ..FontConfig::default()
       }),
     },
   ]);
 
-  imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
-
   let renderer = Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
-  System { events_loop, display, imgui, platform, renderer, font_size }
+  System { event_loop, display, imgui, platform, renderer, window }
 }
 
 impl System {
   pub fn main_loop<
-    F: FnMut(&mut bool, &mut Ui, &mut Renderer, &glium::Display, f32, &Vec<Event>),
+    F: FnMut(
+      &mut bool,
+      &mut Ui,
+      &mut Renderer,
+      &Display<WindowSurface>,
+      f32,
+      &Vec<(PhysicalKey, ElementState)>,
+    ),
   >(
     self,
     mut run_ui: F,
   ) {
-    let System { mut events_loop, display, mut imgui, mut platform, mut renderer, .. } = self;
-    let gl_window = display.gl_window();
-    let window = gl_window.window();
+    let System { mut event_loop, display, mut imgui, mut platform, mut renderer, window, .. } =
+      self;
+
     let mut last_frame = Instant::now();
-    let mut run = true;
-
-    while run {
-      let mut events = Vec::with_capacity(64);
-      events_loop.poll_events(|event| {
-        events.push(event);
-      });
-      for event in &events {
-        platform.handle_event(imgui.io_mut(), &window, event);
-
-        if let Event::WindowEvent { event, .. } = event {
-          if let WindowEvent::CloseRequested = event {
-            run = false;
-          }
+    let mut key_events = Vec::with_capacity(64);
+    let mut fps = 0.0;
+    event_loop
+      .run(move |event, window_target| match event {
+        Event::NewEvents(_) => {
+          let now = Instant::now();
+          let io = imgui.io_mut();
+          io.config_flags.set(ConfigFlags::DOCKING_ENABLE, true);
+          fps = io.framerate;
+          io.update_delta_time(now - last_frame);
+          last_frame = now;
         }
-      }
-      let io = imgui.io_mut();
-      platform.prepare_frame(io, &window).expect("Failed to start frame");
-      last_frame = io.update_delta_time(last_frame);
-      let fps = io.framerate;
-      let mut ui = imgui.frame();
-      run_ui(&mut run, &mut ui, &mut renderer, &display, fps, &events);
+        Event::AboutToWait => {
+          platform.prepare_frame(imgui.io_mut(), &window).expect("Failed to prepare frame");
+          window.request_redraw();
+        }
+        Event::DeviceEvent {
+          event:
+            imgui_winit_support::winit::event::DeviceEvent::Key(
+              imgui_winit_support::winit::event::RawKeyEvent { physical_key, state },
+            ),
+          ..
+        } => {
+          key_events.push((physical_key, state));
+        }
+        Event::WindowEvent { event: WindowEvent::RedrawRequested, .. } => {
+          let mut ui = imgui.frame();
+          ui.dockspace_over_main_viewport();
 
-      let mut target = display.draw();
-      target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
-      platform.prepare_render(&ui, &window);
-      let draw_data = ui.render();
-      renderer.render(&mut target, draw_data).expect("Rendering failed");
-      target.finish().expect("Failed to swap buffers");
-    }
+          let mut run = true;
+          run_ui(&mut run, &mut ui, &mut renderer, &display, fps, &key_events);
+          key_events.clear();
+          if !run {
+            window_target.exit();
+          }
+
+          let mut target = display.draw();
+          //target.clear_color_srgb(1.0, 1.0, 1.0, 1.0);
+          target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
+          platform.prepare_render(ui, &window);
+          let draw_data = imgui.render();
+          renderer.render(&mut target, draw_data).expect("Rendering failed");
+          target.finish().expect("Failed to swap buffers");
+        }
+        Event::WindowEvent { event: WindowEvent::Resized(new_size), .. } => {
+          if new_size.width > 0 && new_size.height > 0 {
+            display.resize((new_size.width, new_size.height));
+          }
+          platform.handle_event(imgui.io_mut(), &window, &event);
+        }
+        Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => window_target.exit(),
+        event => {
+          platform.handle_event(imgui.io_mut(), &window, &event);
+        }
+      })
+      .expect("EventLoop error");
   }
 }
