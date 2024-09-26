@@ -161,8 +161,12 @@ fn immediate_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     3 => {
       // SUB
-      let (res, overflow) = rd_val.overflowing_sub(offset);
-      gba.cpsr.set_all_status_flags(res, Some(offset <= rd_val), Some(overflow));
+      let (res, _overflow) = rd_val.overflowing_sub(offset);
+      gba.cpsr.set_all_status_flags(
+        res,
+        Some(offset <= rd_val),
+        Some(((rd_val ^ offset) as i32) < 0 && ((offset ^ res) as i32) >= 0),
+      );
       res
     }
     _ => std::unreachable!(), // It's 2 bits
@@ -392,20 +396,30 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     2 => {
       // MOV
-      gba.regs[rd] = if rs == 15 { gba.regs[15].overflowing_add(2).0 } else { gba.regs[rs] };
+      let x = gba.regs[rs];
+      gba.regs[rd] = if rd == 15 { gba.regs[rs] & 0xFFFF_FFFE } else { gba.regs[rs] };
       gba.clocks += gba.sequential_cycle()
-        + if rs == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
+        + if rd == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
+      if let Some(f) = gba.debug_print_fn {
+        f(format!("MOV x:{:08X} rd:{:08X}", x, gba.regs[rd]).as_str());
+      }
     }
     3 => {
       // Ignore BLX since it's ARMv9
       // BX
       // Change to ARM mode if bit 0 is 0
       let rs_val = gba.regs[rs];
-      gba.cpsr.set_thumb_state_flag((rs_val & 0x0000_0001) != 0);
+      let thumb = (rs_val & 0x0000_0001) != 0;
+      gba.cpsr.set_thumb_state_flag(thumb);
+      //if !thumb {
       if rs == 15 {
+        // Likely wrong (The +4)
         gba.regs[15] = (rs_val & 0xFFFF_FFFC) + 4;
       } else {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
+      }
+      if let Some(f) = gba.debug_print_fn {
+        f(format!("BLX rs_val:{:08X} pc:{:08X}", rs_val, gba.regs[15]).as_str());
       }
       gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
     }
@@ -723,6 +737,7 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
 fn software_interrupt(gba: &mut GBA, opcode: u16) -> ThumbResult {
   super::arm::software_interrupt(gba, u32::from(opcode) << 16)?;
 
+  //  TODO: This is wrong right? Already done in arm::software_interrupt
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
 
   Ok(())
@@ -765,10 +780,10 @@ fn branch_and_link_or_link_and_exchange_first_opcode(gba: &mut GBA, opcode: u16)
 fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16) -> ThumbResult {
   //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
   let lower_offset = u32::from(as_low_11bits(opcode) << 1);
-  let pc = gba.regs[15].overflowing_add(2).0;
+  let pc = gba.regs[15];
 
   gba.regs[15] = gba.regs[14].overflowing_add(lower_offset).0;
-  gba.regs[14] = pc.overflowing_sub(1).0;
+  gba.regs[14] = pc | 0x1;
 
   gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle();
 
@@ -803,7 +818,7 @@ fn decode_thumb(opcode: u16) -> Result<ThumbInstruction, ThumbError> {
     [T, T, T, F, F, _, _, _] => branch,
     [T, T, T, T, F, _, _, _] => branch_and_link_or_link_and_exchange_first_opcode,
     [T, T, T, T, T, _, _, _] => branch_and_link_or_link_and_exchange_second_opcode,
-    _ => return Err(format!("Invalid thumb opcode: {:x}", opcode)),
+    _ => return Err(format!("Invalid thumb opcode: {:08X}", opcode)),
   })
 }
 
