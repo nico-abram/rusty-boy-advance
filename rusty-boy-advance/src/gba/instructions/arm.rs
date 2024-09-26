@@ -186,6 +186,8 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
 pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
   let ret_pc = gba.regs[15];
 
+  let old_cpsr = gba.cpsr;
+  gba.spsrs[CpuMode::Supervisor.as_usize() - 1] = old_cpsr;
   gba.set_mode(CpuMode::Supervisor);
 
   gba.regs[14] = ret_pc;
@@ -975,6 +977,7 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
     ),
     ([F, T, _, _, _, _, _, _], _) => single_data_transfer,
     ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => multiply,
+    // TODO: Is this first T in multiply_long  wrong?
     ([F, F, F, F, T, _, _, _], [_, _, _, _, T, F, F, T]) => multiply_long,
     ([F, F, F, T, F, _, F, F], [F, F, F, F, T, F, F, T]) => single_data_swap,
     ([F, F, F, _, _, _, _, _], [F, F, F, F, T, _, _, T]) => {
