@@ -13,6 +13,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+copypasta = "0.10.1"
 rusty-boy-advance = { path = "../rusty-boy-advance" }
 glium = { version = "0.34.0", default-features = true }
 glutin = "0.32.1"

@@ -8,3 +8,10 @@ members = [
 
 [profile.release]
 debug = true
+
+[profile.dev]
+opt-level = 1 # Use slightly better optimizations.
+overflow-checks = false # Disable integer overflow checks.
+debug-assertions = false
+lto = false
+incremental = true

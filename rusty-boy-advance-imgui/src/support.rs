@@ -10,6 +10,22 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::WindowBuilder;
 
+use copypasta::{ClipboardContext, ClipboardProvider};
+use imgui::ClipboardBackend;
+pub struct ClipboardSupport(pub ClipboardContext);
+pub fn clipboard_init() -> Option<ClipboardSupport> {
+  ClipboardContext::new().ok().map(ClipboardSupport)
+}
+impl ClipboardBackend for ClipboardSupport {
+  fn get(&mut self) -> Option<String> {
+    self.0.get_contents().ok()
+  }
+  fn set(&mut self, text: &str) {
+    // ignore errors?
+    let _ = self.0.set_contents(text.to_owned());
+  }
+}
+
 pub struct System {
   pub event_loop: EventLoop<()>,
   pub display: Display<WindowSurface>,
@@ -19,18 +35,7 @@ pub struct System {
   pub window: imgui_winit_support::winit::window::Window,
 }
 
-// We can't make a const range array atm. Maybe make this less hideous
-// With something like a lazy static, but it's probably not worth it
-// as this works and is just a temporary hack until we can define it as const
-static mut ICON_GLYPH_RANGE: [u16; 257] = [0u16; 257];
-
 pub fn init(title: &str) -> System {
-  unsafe {
-    for (idx, x) in ICON_GLYPH_RANGE.iter_mut().enumerate() {
-      *x = (idx + 0xe000) as u16;
-    }
-    ICON_GLYPH_RANGE[256] = 0;
-  }
   let event_loop = EventLoop::new().expect("Failed to create EventLoop");
   let builder: WindowBuilder =
     WindowBuilder::new().with_maximized(true).with_title(title.to_owned());
@@ -49,7 +54,6 @@ pub fn init(title: &str) -> System {
     *x = (idx + 0xe000) as u32;
   }
   icon_glyph_range[256] = 0;
-  //let icon_glyph_range = icon_glyph_range.align_to::<u16>();
 
   pub const FONT_SIZE: f32 = 26.0;
   // Fixed font size. Note imgui_winit_support uses "logical
@@ -102,6 +106,10 @@ pub fn init(title: &str) -> System {
 
   let renderer = Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
+  if let Some(backend) = clipboard_init() {
+    imgui.set_clipboard_backend(backend);
+  }
+
   System { event_loop, display, imgui, platform, renderer, window }
 }
 
@@ -119,8 +127,7 @@ impl System {
     self,
     mut run_ui: F,
   ) {
-    let System { mut event_loop, display, mut imgui, mut platform, mut renderer, window, .. } =
-      self;
+    let System { event_loop, display, mut imgui, mut platform, mut renderer, window, .. } = self;
 
     let mut last_frame = Instant::now();
     let mut key_events = Vec::with_capacity(64);
