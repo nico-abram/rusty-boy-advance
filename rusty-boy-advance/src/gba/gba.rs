@@ -213,7 +213,11 @@ impl GBA {
   pub(crate) fn set_log_level(&mut self, log_level: LogLevel) {
     const PRINT_OPCODE: fn(&mut GBA, u32) = |gba: &mut GBA, opcode: u32| {
       if let Some(f) = gba.print_fn {
-        f(format!("opcode {}:{:x}\n", gba.executed_instructions_count, opcode).as_str());
+        f(format!(
+          "instcount:{} opcode:{:08X} pc:${:08X}\n",
+          gba.executed_instructions_count, opcode, gba.regs[15]
+        )
+        .as_str());
       }
     };
     const PRINT_STATE: fn(&mut GBA) = |gba: &mut GBA| {
@@ -286,7 +290,7 @@ impl GBA {
       // BIOS - System ROM (16 KBytes) E3A02004
       0x00 => self.bios_rom[(addr & 0x0000_3FFF) as usize],
       // WRAM - On-board Work RAM  (256 KBytes) 2 Wait
-      0x02 => self.wram_board[(addr & 0x00FF_FFFF) as usize],
+      0x02 => self.wram_board[(addr & 0x0003_FFFF) as usize],
       // WRAM - On-chip Work RAM   (32 KBytes) (Mirrored until 0x0400_0000)
       0x03 => self.wram_chip[(addr & 0x0000_7FFF) as usize],
       // I/O Registers             (1022 Bytes)
@@ -502,7 +506,7 @@ impl GBA {
         .iter()
         .enumerate()
         .map(|(idx, val)| format!(
-          "r{}:{:x}",
+          "r{}:{:X}",
           idx,
           if idx == 15 { val + if self.cpsr.thumb_state_flag() { 2 } else { 4 } } else { *val }
         ))
