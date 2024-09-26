@@ -6,5 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(feature = "std")]
+pub mod disasm;
 mod gba;
 pub use gba::*;

@@ -968,13 +968,29 @@ fn decode_arm(opcode: u32) -> Result<ARMInstruction, ARMError> {
   let bits11_4 = (opcode >> 4) as u8;
 
   Ok(match (bits27_20.as_bools(), bits11_4.as_bools()) {
-    ([F, T, T, _, _, _, _, _], [_, _, _, _, _, _, _, T]) => unimplemented!(
-      "Unimplemented: Undefined instruction {:b} ({:x}) bits 27-20: {:x} bits 11-4: {:x}",
-      opcode,
-      opcode,
-      bits27_20,
-      bits11_4 // TODO: Jump to undef handler
-    ),
+    ([F, T, T, _, _, _, _, _], [_, _, _, _, _, _, _, T]) => {
+      /*
+      unimplemented!(
+        "Unimplemented: Undefined instruction {:b} ({:x}) bits 27-20: {:x} bits 11-4: {:x}",
+        opcode,
+        opcode,
+        bits27_20,
+        bits11_4 // TODO: Jump to undef handler
+      ) */
+      let f: ARMInstruction = |gba, opcode| {
+        let bits27_20 = (opcode >> 20) as u8;
+        let bits11_4 = (opcode >> 4) as u8;
+        Err(format!(
+          "Unimplemented: Undefined instruction pc:{:08X} opcode:{:b} ({:08X}) bits 27-20: {:x} bits 11-4: {:x}\n",
+          gba.regs[15],
+          opcode,
+          opcode,
+          bits27_20,
+          bits11_4 // TODO: Jump to undef handler
+        ))
+      };
+      f
+    }
     ([F, T, _, _, _, _, _, _], _) => single_data_transfer,
     ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => multiply,
     // TODO: Is this first T in multiply_long  wrong?

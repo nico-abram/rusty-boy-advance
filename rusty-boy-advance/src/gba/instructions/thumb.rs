@@ -339,7 +339,9 @@ fn alu_operation(gba: &mut GBA, opcode: u16) -> ThumbResult {
       // MUL (Multiply)
       let res = rd_val.overflowing_mul(rs_val).0;
       gba.regs[rd] = res;
-      gba.cpsr.set_all_status_flags(res, Some(false), None);
+      // GBATEK:   N,Z,C   for  MUL on ARMv4 and below: carry flag destroyed
+      // "Destroyed" doesnt mean unset. We can do anything here, try to match mesen
+      gba.cpsr.set_all_status_flags(res, None, None);
 
       gba.clocks +=
         gba.sequential_cycle() + (((res & 0xC000_0000) >> 30) + 1) * gba.internal_cycle();

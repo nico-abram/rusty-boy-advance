@@ -214,15 +214,22 @@ impl GBA {
     const PRINT_OPCODE: fn(&mut GBA, u32) = |gba: &mut GBA, opcode: u32| {
       if let Some(f) = gba.print_fn {
         f(format!(
-          "instcount:{} opcode:{:08X} pc:${:08X}\n",
-          gba.executed_instructions_count, opcode, gba.regs[15]
+          "instcount:{:10} opcode:{:08X} pc:${:08X}  {}\n",
+          gba.executed_instructions_count,
+          opcode,
+          gba.regs[15],
+          if gba.cpsr.thumb_state_flag() {
+            crate::disasm::disasm_thumb(opcode as u16)
+          } else {
+            crate::disasm::disasm_arm(opcode)
+          }
         )
         .as_str());
       }
     };
     const PRINT_STATE: fn(&mut GBA) = |gba: &mut GBA| {
       if let Some(f) = gba.print_fn {
-        f(format!("{}\n", gba.state_as_string()).as_str());
+        f(format!("{}\n", gba.state_as_string_()).as_str());
       }
     };
 
@@ -472,6 +479,7 @@ impl GBA {
     self.regs[13] = 0x0300_7F00; // Taken from mgba
     self.regs[15] = RESET_HANDLER;
     self.regs[15] = 0x0800_0000; // Skip BIOS
+    self.regs[14] = self.regs[15];
   }
 
   /// Load a ROM from a reader
@@ -498,6 +506,24 @@ impl GBA {
     self.cpsr.thumb_state_flag()
   }
 
+  pub fn state_as_string_(&mut self) -> String {
+    format!(
+      "{} CPSR:{:08X}\n{}",
+      self
+        .regs
+        .iter()
+        .enumerate()
+        .map(|(idx, val)| format!(
+          "R{}:{:08X}",
+          idx,
+          if idx == 15 { val + if self.cpsr.thumb_state_flag() { 4 } else { 8 } } else { *val }
+        ))
+        .collect::<Vec<_>>()
+        .join(" "),
+      self.cpsr.0,
+      self.cpsr
+    )
+  }
   pub fn state_as_string(&mut self) -> String {
     format!(
       "{}\n{}",
@@ -506,9 +532,13 @@ impl GBA {
         .iter()
         .enumerate()
         .map(|(idx, val)| format!(
-          "r{}:{:X}",
+          "r{}:{:08X}",
           idx,
-          if idx == 15 { val + if self.cpsr.thumb_state_flag() { 2 } else { 4 } } else { *val }
+          if idx == 15 {
+            val /*+ if self.cpsr.thumb_state_flag() { 2 } else { 4 } */
+          } else {
+            val
+          }
         ))
         .collect::<Vec<_>>()
         .join(" "),
@@ -571,7 +601,7 @@ impl GBA {
     if column_offset == NUM_HORIZONTAL_PIXELS {
       self.trigger_interrupt_if_enabled(HBLANK_IE_BIT);
     }
-    if row_offset == NUM_REAL_SCANLINES {
+    if row_offset == NUM_REAL_SCANLINES && column_offset == 0 {
       self.trigger_interrupt_if_enabled(VBLANK_IE_BIT);
     }
 
@@ -581,7 +611,7 @@ impl GBA {
     let vcount_setting = (prev_status & 0xFF00) >> 8;
     let vcounter_flag = vcount_setting == row_offset;
 
-    if vcounter_flag {
+    if vcounter_flag && column_offset == 0 {
       self.trigger_interrupt_if_enabled(VCOUNTER_IE_BIT);
     }
 
@@ -848,6 +878,7 @@ impl GBA {
     if master_interrupt_enable && cpsr_interrupt_enable && this_interrupt_enable {
       self.write_u32(INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR, bit);
       self.set_mode(CpuMode::IRQ);
+      self.cpsr.set_thumb_state_flag(false);
       self.regs[15] = BIOS_INTERRUPT_HANDLER;
     }
   }
@@ -871,11 +902,7 @@ impl GBA {
     let count = {
       let count = self.fetch_u16(count_addr);
       let max_count = if dma_num == 3 { 0xFFFF } else { 0x3FFF };
-      if count == 0 {
-        max_count
-      } else {
-        count & max_count
-      }
+      if count == 0 { max_count } else { count & max_count }
     };
 
     let modifier_source: fn(&mut u32, u32) = match (control_flags >> 7) & 3 {
@@ -949,5 +976,9 @@ impl GBA {
   #[inline]
   pub(crate) fn internal_cycle(&self) -> u32 {
     1
+  }
+
+  pub fn get_executed_instruction_count(&self) -> u64 {
+    self.executed_instructions_count
   }
 }
