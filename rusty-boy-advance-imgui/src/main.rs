@@ -1,9 +1,10 @@
 use capstone::prelude::*;
+use copypasta::ClipboardProvider;
 use glium::{
+  Texture2d,
   backend::Facade,
   texture::{ClientFormat, RawImage2d},
   uniforms::SamplerBehavior,
-  Texture2d,
 };
 use imgui::{Condition, ImString, SelectableFlags};
 use imgui_winit_support::winit::event::ElementState;
@@ -11,8 +12,7 @@ use rusty_boy_advance::{GBABox, GBAButton, GBAError, LogLevel};
 
 use std::{borrow::Cow, collections::VecDeque, io::Read};
 
-mod disasm_arm;
-mod disasm_thumb;
+use rusty_boy_advance::disasm::{disasm_arm, disasm_thumb};
 mod support;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -93,9 +93,9 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
       })
       .join(""),
       if mem.chunk_size == 4 {
-        disasm_arm::disasm_arm(u32::from_le_bytes(chunks.try_into().unwrap()))
+        disasm_arm(u32::from_le_bytes(chunks.try_into().unwrap()))
       } else {
-        disasm_thumb::disasm_thumb(u16::from_le_bytes(chunks.try_into().unwrap()))
+        disasm_thumb(u16::from_le_bytes(chunks.try_into().unwrap()))
       },
       /*
       asm
@@ -122,7 +122,7 @@ impl<T> RacyUnsafeCell<T> {
     self.0.get()
   }
 }
-const LOGS_SIZE: usize = 10_000;
+const LOGS_SIZE: usize = 250_000;
 static mut GBA_LOGS: Option<RacyUnsafeCell<VecDeque<String>>> = None;
 
 fn push_log(s: &str) {
@@ -176,7 +176,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     browsed_memory: &mut BrowsedMemory,
   ) {
     if result.is_err() {
-      let err_string = format!("Fatal Error: {:?}", result);
+      let err_string = format!(
+        "Fatal Error: {:?} ( (pc:{:08X} instcount:{})",
+        result,
+        gba.registers()[15],
+        gba.get_executed_instruction_count()
+      );
       push_log(&err_string);
       *running = false;
       for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().take(50000).rev() {
@@ -493,12 +498,27 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.radio_button("Debug", &mut log_level, LogLevel::Debug) {
           gba.set_log_level(log_level);
         }
+        if ui.radio_button("CFlow", &mut log_level, LogLevel::ControlFlow) {
+          gba.set_log_level(log_level);
+        }
+        ui.separator();
         ui.separator();
         scroll_memory_to_pc |= ui.small_button("Goto PC");
         ui.checkbox("Scroll on brk", &mut scroll_to_pc_on_break);
         ui.checkbox("Auto-update disasm style", &mut auto_update_disasm_style);
         if ui.small_button("Clear Logs") {
           unsafe { &mut *GBA_LOGS.as_mut().unwrap().get() }.clear();
+        }
+        if ui.small_button("Copy mesen-style logs") {
+          let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
+
+          let logstring = logs
+            .iter()
+            .rev()
+            .filter(|x| x.starts_with("R0"))
+            .map::<&str, _>(|x| &*x)
+            .collect::<String>();
+          copypasta::ClipboardContext::new().unwrap().set_contents(logstring);
         }
       });
     ui.window("ROM Loading")
@@ -642,7 +662,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 unsafe { imgui::sys::igSetScrollHereY(0.0) };
               }
               if this_line_is_current_pc {
-                ui.selectable_config("###1")
+                ui.selectable_config("###331")
                   //.size([400.0, 20.0])
                   .flags(SelectableFlags::SPAN_ALL_COLUMNS)
                   .selected(true)
@@ -680,6 +700,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         {
           let id = ui.push_id_int(idx as i32 + 1);
           //ui.input_text("log", log_line).read_only(true);
+          ui.set_window_font_scale(0.80);
           ui.text(log_line);
           if let Some(popup_tok) = ui.begin_popup_context_with_label("##popup") {
             if ui.button("Copy") {
@@ -689,6 +710,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             popup_tok.end();
           }
           id.pop();
+          ui.set_window_font_scale(1.0);
         }
       });
     //ui.show_demo_window(_opened);
