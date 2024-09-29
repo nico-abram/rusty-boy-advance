@@ -6,3 +6,8 @@ be = "run --bin rusty-boy-advance-beryllium --release"
 bei = "run --bin rusty-boy-advance-beryllium --release -- -l 2 -r e.gba -i "
 qu = "run --bin rusty-boy-advance-quicksilver --release"
 quw = "web start -p  rusty-boy-advance-quicksilver --release"
+
+
+
+[build]
+rustflags = ["-Z", "threads=8"]
