@@ -8,8 +8,8 @@ use glium::{
   texture::{ClientFormat, RawImage2d},
   uniforms::SamplerBehavior,
 };
-use imgui::{Condition, ImString, InputTextFlags, SelectableFlags};
-use imgui_winit_support::winit::event::ElementState;
+use imgui::{sys::igDockBuilderAddNode, Condition, ImString, InputTextFlags, SelectableFlags, StyleVar, TextureId};
+use imgui_winit_support::winit::{dpi::Size, event::ElementState};
 use rusty_boy_advance::{
   CLOCKS_PER_FRAME, CLOCKS_PER_PIXEL, CLOCKS_PER_SCANLINE, GBABox, GBAButton, GBAError, LogLevel,
 };
@@ -135,6 +135,21 @@ fn push_log(s: &str) {
   logs.push_front(String::from(s));
   logs.truncate(LOGS_SIZE);
 }
+
+fn imgui_glium_texture(system:&mut support::System, width:u32, height:u32, data:Vec<u8>) -> TextureId{
+  let gl_texture = {
+    let raw = RawImage2d {
+      data: Cow::Owned(data),
+      width: width ,
+      height: height ,
+      format: ClientFormat::U8U8U8,
+    };
+    let tex2d = Texture2d::new(system.display.get_context(), raw).unwrap();
+    imgui_glium_renderer::Texture { texture: tex2d.into(), sampler: SamplerBehavior::default() }
+  };
+  let texture_id = system.renderer.textures().insert(gl_texture);
+  texture_id
+}
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   unsafe { GBA_LOGS = Some(RacyUnsafeCell::new(VecDeque::with_capacity(LOGS_SIZE))) };
   const WIDTH: u32 = 240;
@@ -143,17 +158,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut log_control_flow = false;
   let mut gba = GBABox::new(log_level, None, Some(push_log));
   let mut system = support::init("Rusty Boy Advance ImGui");
-  let gl_texture = {
-    let raw = RawImage2d {
-      data: Cow::Owned(gba.video_output().into()),
-      width: WIDTH as u32,
-      height: HEIGHT as u32,
-      format: ClientFormat::U8U8U8,
-    };
-    let tex2d = Texture2d::new(system.display.get_context(), raw).unwrap();
-    imgui_glium_renderer::Texture { texture: tex2d.into(), sampler: SamplerBehavior::default() }
-  };
-  let video_output_texture_id = system.renderer.textures().insert(gl_texture);
+  let video_output_texture_id = imgui_glium_texture(&mut system, WIDTH, HEIGHT, gba.video_output().into());
+  
+  let bg_tile_texture_ids: [_; 32*32] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
+  let mut bg_tile_metadata: [_; 32*32] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32)});
+  let tile_texture_ids: [_; 512] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
+  let mut bg_viewer_bg_idx = 0;
+  let  mut tile_viewer_tile_page = 0;
+  let mut tile_viewer_bpp8=false;
+  let mut tile_viewer_palette=0;
+
   let mut current_rom_file = String::with_capacity(128);
   let mut running = false;
   let mut just_clicked_continue = false;
@@ -202,8 +216,48 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
   }
 
+  let mut bottom_dock_id = 0u32; // log
+  let mut top_dock_id = 0u32;
+  let mut top_right_dock_id = 0u32;//debug buttons
+  let mut top_left_dock_id = 0u32;//cpu state
+  let mut top_left2_top_dock_id = 0u32;//ROM loading
+  let mut top_left2_bot_dock_id = 0u32;//output
+  let mut remainder_dock_id = 0u32;//output
+  let mut dockspace_initialized = false;
   update_currently_browsed_memory_string(&gba, &mut browsed_memory);
   system.main_loop(|_opened, ui, renderer, _display, framerate, key_events| {
+    let dockspace_id = unsafe {imgui::sys::igDockSpaceOverViewport(imgui::sys::igGetMainViewport(), imgui::sys::ImGuiDockNodeFlags_PassthruCentralNode as i32, std::ptr::null())};
+    //println!("top_left2_bot_dock_id:{top_left2_bot_dock_id} top_left2_top_dock_id:{top_left2_top_dock_id} bottom_dock_id:{bottom_dock_id} top_right_dock_id:{top_right_dock_id} remainder_dock_id:{remainder_dock_id}");
+    if ! dockspace_initialized {
+      dockspace_initialized=true;
+    unsafe {
+      let root_node = imgui::sys::igDockBuilderGetNode(dockspace_id);
+
+      imgui::sys::igDockBuilderRemoveNode(dockspace_id);
+      let dock_id_main = imgui::sys::igDockBuilderAddNode(dockspace_id, imgui::sys::ImGuiDockNodeFlags_DockSpace);
+      imgui::sys::igDockBuilderSetNodeSize(dock_id_main, (*imgui::sys::igGetMainViewport()).Size);
+      /*
+      */
+      //let dock_id_main = dockspace_id;
+
+      imgui::sys::igDockBuilderSplitNode(dock_id_main, imgui::sys::ImGuiDir_Down,
+         0.35, &mut bottom_dock_id, &mut top_dock_id);
+         
+      imgui::sys::igDockBuilderSplitNode(top_dock_id, imgui::sys::ImGuiDir_Right,
+        0.185, &mut top_right_dock_id, &mut top_left_dock_id);
+       imgui::sys::igDockBuilderSplitNode(top_left_dock_id, imgui::sys::ImGuiDir_Left,
+        0.225, &mut top_left_dock_id, &mut remainder_dock_id);
+
+        imgui::sys::igDockBuilderSplitNode(remainder_dock_id, imgui::sys::ImGuiDir_Left,
+         0.4, &mut top_left2_top_dock_id, &mut remainder_dock_id);
+         
+        imgui::sys::igDockBuilderSplitNode(top_left2_top_dock_id, imgui::sys::ImGuiDir_Down,
+          0.75, &mut top_left2_bot_dock_id, &mut top_left2_top_dock_id);
+
+          imgui::sys::igDockBuilderFinish(dockspace_id);
+    }
+  }
+    
     //let mut scroll_memory_to_pc = just_clicked_continue;
     if running {
       if !ui.io().want_capture_keyboard {
@@ -280,6 +334,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       }
       just_clicked_continue = false;
     }
+    unsafe {
+      imgui::sys::igSetNextWindowDockID(top_left2_bot_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+    }
     ui.window(unsafe {
       imgui::ImStr::from_utf8_with_nul_unchecked(
         format!(
@@ -291,7 +348,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .as_bytes(),
       )
     })
-    .position([420.0, 200.0], Condition::Appearing)
+    //.position([420.0, 200.0], Condition::Appearing)
     .always_auto_resize(true)
     .build(|| {
       let texture = renderer.textures().get(video_output_texture_id).unwrap();
@@ -305,10 +362,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       imgui::Image::new(video_output_texture_id, [(WIDTH * 2) as f32, (HEIGHT * 2) as f32])
         .build(ui);
     });
+    unsafe {
+      imgui::sys::igSetNextWindowDockID(top_left_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+    }
     ui.window("CPU State")
-      .size([420.0, 520.0], Condition::Appearing)
+      //.size([420.0, 520.0], Condition::Appearing)
       .resizable(true)
-      .position([0.0, 0.0], Condition::Appearing)
+      //.position([0.0, 0.0], Condition::Appearing)
       .build(|| {
         ui.columns(2, "a", true);
         let cpsr = gba.cpsr();
@@ -358,8 +418,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           id.pop();
         }
       });
+      unsafe {
+        imgui::sys::igSetNextWindowDockID(top_right_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+      }
     ui.window("Debug Buttons")
-      .position([1600.0, 0.0], Condition::Appearing)
+      //.position([1600.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
         let stop_continue_icon = if running { " " } else { " " };
@@ -544,9 +607,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let _pushed_width = ui.push_item_width(200.0);
         ui.input_scalar("###91283", &mut go_to_addr_target).display_format("%08X").flags(InputTextFlags::CHARS_HEXADECIMAL).step(1).build();
       });
+      unsafe {
+        imgui::sys::igSetNextWindowDockID(top_left2_top_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+      }
     ui.window("ROM Loading")
-      .position([420.0, 0.0], Condition::Appearing)
-      .size([260.0, 200.0], Condition::Appearing)
+      //.position([420.0, 0.0], Condition::Appearing)
+      //.size([260.0, 200.0], Condition::Appearing)
       .build(|| {
         if ui.small_button("Browse") {
           match nfd::open_file_dialog(None, None).unwrap_or(nfd::Response::Cancel) {
@@ -579,8 +645,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           ui.text(msg);
         }
       });
+      unsafe {
+        imgui::sys::igSetNextWindowDockID(remainder_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+      }
     ui.window("Memory Viewer")
-      .position([980.0, 0.0], Condition::Appearing)
+      //.position([980.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
       .build(|| {
         if ui.radio_button("BIOS", &mut browsed_memory.mem, BrowsableMemory::BIOS) {
@@ -733,9 +802,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
           });
       });
+      unsafe {
+        imgui::sys::igSetNextWindowDockID(bottom_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+      }
     ui.window("Logs")
-      .position([0.0, 650.0], Condition::Appearing)
-      .size([1915.0, 360.0], Condition::Appearing)
+      //.position([0.0, 650.0], Condition::Appearing)
+      //.size([1915.0, 360.0], Condition::Appearing)
       .always_vertical_scrollbar(true)
       .build(|| {
         /*
@@ -786,6 +858,124 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           ui.set_window_font_scale(1.0);
         }
       });
+      unsafe {
+        imgui::sys::igSetNextWindowDockID(remainder_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+      }
+      ui.window("BG viewer")
+        //.position([0.0, 650.0], Condition::Appearing)
+        //.size([400.0, 400.0], Condition::Appearing)
+        .build(|| {
+          let mut force_update = false;
+          force_update |= ui.radio_button("BG0", &mut bg_viewer_bg_idx, 0) ;
+          ui.same_line();
+          force_update |= ui.radio_button("BG1", &mut bg_viewer_bg_idx, 1) ;
+          ui.same_line();
+          force_update |= ui.radio_button("BG2", &mut bg_viewer_bg_idx,2) ;
+          ui.same_line();
+          force_update |= ui.radio_button("BG3", &mut bg_viewer_bg_idx, 3) ;
+          if ui.button("update") || force_update {
+            for tile_y in 0..32 {
+              for tile_x in 0..32 {
+                let tile_tex_id = bg_tile_texture_ids[tile_x + tile_y*32];
+
+                let texture = renderer.textures().get(tile_tex_id).unwrap();
+                let (tile_bytes, map_addr, char_addr, map_val, char_idx) = rusty_boy_advance::draw::get_mode0_bg_tile(&mut gba, bg_viewer_bg_idx, tile_x as u32, tile_y as u32);
+                let raw = RawImage2d {
+                  data: Cow::Owned(tile_bytes.into()),
+                  width: 8 ,
+                  height: 8,
+                  format: ClientFormat::U8U8U8,
+                };
+                texture.texture.write(glium::Rect { left: 0, bottom: 0, width: 8, height: 8 }, raw);
+                bg_tile_metadata[tile_x + tile_y*32] = (map_addr, char_addr, map_val, char_idx);
+              }
+            }
+          }
+
+          let style = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+          for tile_y in 0..32 {
+            ui.spacing();
+            for tile_x in 0..32 {
+              let tile_tex_id = bg_tile_texture_ids[tile_x + tile_y*32];
+              ui.same_line();
+              imgui::Image::new(tile_tex_id, [16.0 as f32, 16.0 as f32])
+                .build(ui);
+              if ui.is_item_hovered() {
+              ui.tooltip(||{
+                imgui::Image::new(tile_tex_id, [64.0 as f32, 64.0 as f32])
+                  .build(ui);
+                let (map_addr, char_addr, map_val, char_idx) = bg_tile_metadata[tile_x + tile_y*32];
+                ui.text(&format!("tile map address: {map_addr:08X}"));
+                ui.text(&format!("tile data address: {char_addr:08X}"));
+                ui.text(&format!("tile map value: {map_val:08X}"));
+                ui.text(&format!("tile data idx: {char_idx:08X}"));
+              });
+            }
+            }
+          }
+          style.pop();
+        });
+        unsafe {
+          imgui::sys::igSetNextWindowDockID(remainder_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+        }
+      ui.window("Tile viewer")
+        //.position([0.0, 650.0], Condition::Appearing)
+        //.size([400.0, 400.0], Condition::Appearing)
+        .build(|| {
+          let mut force_update= false;
+          ui.text("page");
+          force_update |= ui.radio_button("0", &mut tile_viewer_tile_page, 0) ;
+          ui.same_line();
+          force_update |= ui.radio_button("1", &mut tile_viewer_tile_page, 1) ;
+          ui.same_line();
+          force_update |= ui.radio_button("2", &mut tile_viewer_tile_page, 2) ;
+          ui.same_line();
+          force_update |= ui.radio_button("3", &mut tile_viewer_tile_page, 3) ;
+
+          force_update |= ui.radio_button("BPP4", &mut tile_viewer_bpp8, false) ;
+          ui.same_line();
+          force_update |= ui.radio_button("BPP8", &mut tile_viewer_bpp8, true) ;
+          ui.text("palette");
+          for i in 0..32 {
+            ui.same_line();
+            if i%8 == 0  {
+              ui.new_line();
+            }
+            force_update |= ui.radio_button(i.to_string(), &mut tile_viewer_palette, i) ;
+          }
+          if ui.button("update") || force_update {
+            // 32 for bpp4, 16 for bpp8
+            for tile_y in 0..32 {
+              for tile_x in 0..16 {
+                let tile_tex_id = tile_texture_ids[tile_x + tile_y*16];
+
+                let texture = renderer.textures().get(tile_tex_id).unwrap();
+                let tile_idx = tile_x + tile_y * 16;
+                let tile_bytes = rusty_boy_advance::draw::get_tile(&mut gba, tile_viewer_tile_page, tile_idx as u32, tile_viewer_bpp8, tile_viewer_palette);
+                let raw = RawImage2d {
+                  data: Cow::Owned(tile_bytes.into()),
+                  width: 8 ,
+                  height: 8,
+                  format: ClientFormat::U8U8U8,
+                };
+                texture.texture.write(glium::Rect { left: 0, bottom: 0, width: 8, height: 8 }, raw);
+              }
+            }
+          }
+
+          let style = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+          for tile_y in 0..32 {
+            //ui.new_line();
+            ui.spacing();
+            for tile_x in 0..16 {
+              let tile_tex_id = tile_texture_ids[tile_x + tile_y*16];
+              ui.same_line();
+              imgui::Image::new(tile_tex_id, [16.0 as f32, 16.0 as f32])
+                .build(ui);
+            }
+          }
+          style.pop();
+        });
     //ui.show_demo_window(_opened);
     //ui.show_metrics_window(opened);
   });

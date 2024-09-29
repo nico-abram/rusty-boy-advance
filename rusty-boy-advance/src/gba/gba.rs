@@ -422,7 +422,7 @@ impl GBA {
             if is_stop {
               unimplemented!("STOP written to HALTCNT");
             } else {
-              self.halted = true;
+              //self.halted = true;
             }
           } else {
             self.io_mem[(addr & 0x00FF_FFFF) as usize] = byte;
@@ -663,8 +663,8 @@ impl GBA {
   fn update_hvblank(&mut self, clocks_pre_exec: u32) {
     //let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
 
-    let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16) % NUM_SCANLINES;
-    let row_offset_pre_exec = ((clocks_pre_exec / CLOCKS_PER_SCANLINE) as u16) % NUM_SCANLINES;
+    let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16);
+    let row_offset_pre_exec = ((clocks_pre_exec / CLOCKS_PER_SCANLINE) as u16);
 
     let clocks_within_scanline = self.clocks % CLOCKS_PER_SCANLINE;
     let clocks_within_scanline_pre_exec = clocks_pre_exec % CLOCKS_PER_SCANLINE;
@@ -680,11 +680,9 @@ impl GBA {
     let vcounter_flag_pre = vcount_setting == row_offset_pre_exec;
 
     if row_offset != row_offset_pre_exec && row_offset_pre_exec <= NUM_REAL_SCANLINES {
-      self.draw_scanline(row_offset as u32);
-    }
-
-    if vcounter_flag && !vcounter_flag_pre {
-      self.trigger_interrupt_if_enabled(VCOUNTER_IE_BIT);
+      for row in row_offset_pre_exec..row_offset {
+        self.draw_scanline(row as u32);
+      }
     }
 
     if hblank && clocks_within_scanline_pre_exec < HBLANK_CYCLES {
@@ -692,6 +690,10 @@ impl GBA {
     }
     if row_offset == NUM_REAL_SCANLINES && row_offset_pre_exec != NUM_REAL_SCANLINES {
       self.trigger_interrupt_if_enabled(VBLANK_IE_BIT);
+    }
+
+    if vcounter_flag && !vcounter_flag_pre {
+      self.trigger_interrupt_if_enabled(VCOUNTER_IE_BIT);
     }
 
     let new_status = (prev_status & 0b1111_1111_1111_1000)
@@ -705,7 +707,6 @@ impl GBA {
 
   pub fn run_one_frame(&mut self) -> Result<(), GBAError> {
     while self.clocks < CLOCKS_PER_FRAME {
-      //for _ in 1..1000 {
       self.run_one_instruction()?;
     }
     self.clocks -= CLOCKS_PER_FRAME;
@@ -794,18 +795,18 @@ impl GBA {
       // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
       let tile_map_element = u32::from(gba.fetch_u16(tile_map_element_addr));
 
-      let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x1FF });
-      let tile_addr = 0x0600_0000 + tile_number * bytes_per_tile;
+      let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
+      let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
 
       let h_flip = (tile_map_element & 0x0000_0400) != 0;
       let v_flip = (tile_map_element & 0x0000_0800) != 0;
 
       if full_palette {
         // 1 byte per pixel
-        for i in 0..8 {
-          let i = i + (scanline % 8) * 8;
+        for i in 0..64 {
+          let i = i;
 
-          let palette_idx = gba.fetch_byte(tile_data_base_addr + tile_number + i) as usize;
+          let palette_idx = gba.fetch_byte(tile_addr + i) as usize;
           let color = u16::from(gba.palette_ram[palette_idx])
             + (u16::from(gba.palette_ram[palette_idx + 1]) << 8);
 
@@ -826,12 +827,13 @@ impl GBA {
           // Each sub palette has 16 colors of 2 bytes each
           (palette_number * 16 * 2) as usize
         };
-        for i in 0..4u32 {
-          let i = i + (scanline % 8) * 4;
-
+        for i in 0..32u32 {
           let (mut px_x_within_tile, mut px_y_within_tile) = ((i & 0x3) * 2, (i >> 2));
 
           // TODO: Things seem to be wrong when moving along both ways mid-tile when flipping?
+          // clarification: it is when we have a non zero scroll on x, and without moving through x we move
+          // through y, the left-most scrollx pixels are not being drawn to, it seems
+          // probably need to draw from 1 more tile?
           if h_flip {
             px_x_within_tile = 7 - px_x_within_tile;
           };
@@ -887,14 +889,16 @@ impl GBA {
     const SCREEN_X_TILE_COUNT: u32 = (VIDEO_WIDTH as u32) / TILE_WIDTH;
     // We use an extra one for the case were we are mid-scroll and are displaying N+1 tiles
     let y = scanline / TILE_HEIGHT;
-    for x in 0..=SCREEN_X_TILE_COUNT {
-      draw_tile(
-        self,
-        (bg_first_tile_x + x) % bg_x_tile_count,
-        (bg_first_tile_y + y) % bg_y_tile_count,
-        x,
-        y,
-      );
+    for y in 0..=SCREEN_Y_TILE_COUNT {
+      for x in 0..=SCREEN_X_TILE_COUNT {
+        draw_tile(
+          self,
+          (bg_first_tile_x + x) % bg_x_tile_count,
+          (bg_first_tile_y + y) % bg_y_tile_count,
+          x,
+          y,
+        );
+      }
     }
   }
 
@@ -962,8 +966,8 @@ impl GBA {
           // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
           let tile_map_element = u32::from(gba.fetch_u16(tile_map_element_addr));
 
-          let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x1FF });
-          let tile_addr = 0x0600_0000 + tile_number * bytes_per_tile;
+          let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
+          let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
 
           let h_flip = (tile_map_element & 0x0000_0400) != 0;
           let v_flip = (tile_map_element & 0x0000_0800) != 0;

@@ -1,6 +1,6 @@
 mod cpsr;
 mod cpu_mode;
-mod draw;
+pub mod draw;
 #[allow(clippy::module_inception)]
 mod gba;
 mod instructions;

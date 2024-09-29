@@ -1,14 +1,14 @@
-use glium::glutin::surface::WindowSurface;
-use glium::{Display, Surface};
+use glium::{Display, Surface, glutin::surface::WindowSurface};
 use imgui::{ConfigFlags, Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::Renderer;
-use imgui_winit_support::winit;
-use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use imgui_winit_support::{HiDpiMode, WinitPlatform, winit};
 use std::time::Instant;
-use winit::event::{ElementState, Event, WindowEvent};
-use winit::event_loop::EventLoop;
-use winit::keyboard::PhysicalKey;
-use winit::window::WindowBuilder;
+use winit::{
+  event::{ElementState, Event, WindowEvent},
+  event_loop::EventLoop,
+  keyboard::PhysicalKey,
+  window::WindowBuilder,
+};
 
 use copypasta::{ClipboardContext, ClipboardProvider};
 use imgui::ClipboardBackend;
@@ -157,7 +157,7 @@ impl System {
         }
         Event::WindowEvent { event: WindowEvent::RedrawRequested, .. } => {
           let mut ui = imgui.frame();
-          ui.dockspace_over_main_viewport();
+          //ui.dockspace_over_main_viewport();
 
           let mut run = true;
           run_ui(&mut run, &mut ui, &mut renderer, &display, fps, &key_events);
