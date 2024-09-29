@@ -1,5 +1,4 @@
-use std::format;
-use std::string::String;
+use std::{format, string::String};
 
 /// Utility impl on u8's for some kind of "bit pattern matching".
 ///
@@ -155,7 +154,7 @@ fn multiply(opcode: u32) -> String {
 fn multiply_long(opcode: u32) -> String {
   let spred = opcode_to_cond(opcode);
 
-  let (is_unsupported, store_double_word_result, signed, accumulate, set_cond_flags) =
+  let (is_unsupported, _store_double_word_result, signed, accumulate, set_cond_flags) =
     as_flags(opcode);
   let (rdhigh_aka_rd, rdlow_aka_rn, rs, _, rm) = as_usize_nibbles(opcode);
 
@@ -164,17 +163,9 @@ fn multiply_long(opcode: u32) -> String {
   }
 
   let verb = if signed {
-    if accumulate {
-      "SMLAL"
-    } else {
-      "SMULL"
-    }
+    if accumulate { "SMLAL" } else { "SMULL" }
   } else {
-    if accumulate {
-      "UMLAL"
-    } else {
-      "UMULL"
-    }
+    if accumulate { "UMLAL" } else { "UMULL" }
   };
   let scond = if set_cond_flags { "S" } else { "" };
 
@@ -186,8 +177,8 @@ fn single_data_transfer(opcode: u32) -> String {
   let spred = opcode_to_cond(opcode);
 
   let shifted_register = as_extra_flag(opcode);
-  let (is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
-  let (rn, rd, third_byte, second_byte, first_byte) = as_usize_nibbles(opcode);
+  let (_is_pre_offseted, is_up, is_byte_size, bit_21, is_load) = as_flags(opcode);
+  let (rn, rd, _third_byte, _second_byte, _first_byte) = as_usize_nibbles(opcode);
 
   let verb = if is_load { "LDR" } else { "STR" };
   let size_s = if is_byte_size { "B" } else { "" };
@@ -197,7 +188,7 @@ fn single_data_transfer(opcode: u32) -> String {
   if !shifted_register {
     //TODO: pre/post offset?
     let offset = opcode & 0x0000_0FFF;
-    format!("{verb}{spred}{writeback_s} R{rd}, [R{rn}, {sign_s}#${offset:04X}]")
+    format!("{verb}{size_s}{spred}{writeback_s} R{rd}, [R{rn}, {sign_s}#${offset:04X}]")
   } else {
     format!("SDT shift?")
   }
@@ -216,7 +207,7 @@ fn single_data_swap(opcode: u32) -> String {
 
 /// Halfword Data Transfer Register Offset (HDT_RO or HDT_IO)
 fn halfword_data_transfer_immediate_or_register_offset(opcode: u32) -> String {
-  let spred = opcode_to_cond(opcode);
+  let _spred = opcode_to_cond(opcode);
 
   "HDT?".into()
 }
@@ -270,14 +261,14 @@ fn branch_and_exchange(opcode: u32) -> String {
 
 /// Move to register from status register (MRS)
 fn move_to_register_from_status_register(opcode: u32) -> String {
-  let spred = opcode_to_cond(opcode);
+  let _spred = opcode_to_cond(opcode);
 
   "MRS?".into()
 }
 
 /// Move to Status Register (MSR)
 fn move_to_status_register(opcode: u32) -> String {
-  let spred = opcode_to_cond(opcode);
+  let _spred = opcode_to_cond(opcode);
 
   "MSR?".into()
 }
@@ -316,9 +307,9 @@ fn alu_operation(opcode: u32) -> String {
 
   if immediate {
     let ror_shift = u32::from(third_byte) << 1;
-    let val = u32::from(lowest_byte + second_byte * 16);
+    let mut val = u32::from(lowest_byte + second_byte * 16);
 
-    val.rotate_right(ror_shift);
+    val = val.rotate_right(ror_shift);
     if operation == 13 {
       format!("{verb}{scond}{spred} R{rd},  #${val:04X}")
     } else {
