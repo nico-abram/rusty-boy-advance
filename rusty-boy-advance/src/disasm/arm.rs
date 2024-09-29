@@ -112,7 +112,12 @@ pub fn disasm_arm(opcode: u32) -> String {
     ([F, F, F, F, F, F, _, _], [_, _, _, _, T, F, F, T]) => multiply(opcode),
     ([F, F, F, F, T, _, _, _], [_, _, _, _, T, F, F, T]) => multiply_long(opcode),
     ([F, F, F, T, F, _, F, F], [F, F, F, F, T, F, F, T]) => single_data_swap(opcode),
-    ([F, F, F, _, _, _, _, _], [F, F, F, F, T, _, _, T]) => {
+    ([F, F, F, _, _, F, _, _], [F, F, F, F, T, _, _, T]) => {
+      // register
+      halfword_data_transfer_immediate_or_register_offset(opcode)
+    }
+    ([F, F, F, _, _, T, _, _], [_, _, _, _, T, _, _, T]) => {
+      // imm
       halfword_data_transfer_immediate_or_register_offset(opcode)
     }
     ([T, F, F, _, _, _, _, _], _) => block_data_transfer(opcode),
