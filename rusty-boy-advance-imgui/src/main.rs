@@ -1,3 +1,5 @@
+#![feature(iter_intersperse)]
+
 use capstone::prelude::*;
 use copypasta::ClipboardProvider;
 use glium::{
@@ -6,9 +8,11 @@ use glium::{
   texture::{ClientFormat, RawImage2d},
   uniforms::SamplerBehavior,
 };
-use imgui::{Condition, ImString, SelectableFlags};
+use imgui::{Condition, ImString, InputTextFlags, SelectableFlags};
 use imgui_winit_support::winit::event::ElementState;
-use rusty_boy_advance::{GBABox, GBAButton, GBAError, LogLevel};
+use rusty_boy_advance::{
+  CLOCKS_PER_FRAME, CLOCKS_PER_PIXEL, CLOCKS_PER_SCANLINE, GBABox, GBAButton, GBAError, LogLevel,
+};
 
 use std::{borrow::Cow, collections::VecDeque, io::Read};
 
@@ -70,20 +74,15 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
     return;
   }
   mem.contents.clear();
-  let disassembler = Capstone::new()
-    .arm()
-    .mode(if mem.chunk_size == 2 { arch::arm::ArchMode::Thumb } else { arch::arm::ArchMode::Arm })
-    .build()
-    .unwrap();
-  let offs = if mem.mem == BrowsableMemory::ROM {
-    (mem.rom_cursor as usize & 0x1FF_FFFF).saturating_sub(128)
-  } else {
-    0
-  };
+
+  let mut chunk_size = mem.chunk_size;
+  if chunk_size == 0 {
+    chunk_size = if gba.cpsr().thumb_state_flag() { 2 } else { 4 };
+  }
+  let offs = if mem.mem == BrowsableMemory::ROM {(mem.rom_cursor as usize & 0x1FF_FFFF).saturating_sub(128) } else {0                         };
   use std::convert::TryInto;
-  for (chunk_idx, chunks) in get_memory(gba, mem.mem, offs).chunks(mem.chunk_size).enumerate() {
-    let addr = ((chunk_idx * mem.chunk_size) as u32) + offset(mem.mem, offs);
-    let asm = disassembler.disasm_all(chunks, 0).unwrap();
+  for (chunk_idx, chunks) in get_memory(gba, mem.mem, offs).chunks(chunk_size).enumerate() {
+    let addr = ((chunk_idx * chunk_size) as u32) + offset(mem.mem, offs);
     mem.contents.push((
       ImString::new(format!("{:08x}:", addr)),
       (if !mem.is_little_endian {
@@ -92,10 +91,16 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
         chunks.iter().map(|x| format!("{:02x}", x)).collect::<Vec<_>>()
       })
       .join(""),
-      if mem.chunk_size == 4 {
-        disasm_arm(u32::from_le_bytes(chunks.try_into().unwrap()))
+      if chunk_size == 4 {
+        chunks
+          .try_into()
+          .map(|b| disasm_arm(u32::from_le_bytes(b)))
+          .unwrap_or_else(|_| "UNWRAP".into())
       } else {
-        disasm_thumb(u16::from_le_bytes(chunks.try_into().unwrap()))
+        chunks
+          .try_into()
+          .map(|b| disasm_thumb(u16::from_le_bytes(b)))
+          .unwrap_or_else(|_| "UNWRAP".into())
       },
       /*
       asm
@@ -153,6 +158,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut just_clicked_continue = false;
   let mut rom_open_msg = None;
   let mut variable_step = 0;
+  let mut scroll_to_addr = false;
+  let mut scroll_to_addr_target = 0;
+  let mut go_to_addr_target = 0;
   let mut browsed_memory = BrowsedMemory {
     mem: BrowsableMemory::BIOS,
     chunk_size: 4,
@@ -164,14 +172,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     rom_cursor: 0x0800_0000u32,
   };
   let mut scroll_to_pc_on_break = true;
-  let mut auto_update_disasm_style = true;
 
   fn post_exec(
     gba: &GBABox,
-    result: Result<(), GBAError>,
-    auto_update_disasm_style: bool,
+    result: Result<bool, GBAError>,
     scroll_to_pc_on_break: bool,
-    scroll_memory_to_pc: &mut bool,
+    scroll_to_addr: &mut bool,
+    scroll_to_addr_target: &mut u32,
     running: &mut bool,
     browsed_memory: &mut BrowsedMemory,
   ) {
@@ -189,19 +196,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       }
     }
     if scroll_to_pc_on_break && !*running {
-      *scroll_memory_to_pc = true;
-    }
-    if auto_update_disasm_style {
-      browsed_memory.chunk_size = if gba.cpsr().thumb_state_flag() { 2 } else { 4 };
+      *scroll_to_addr = true;
+      *scroll_to_addr_target = gba.pc();
     }
   }
 
   update_currently_browsed_memory_string(&gba, &mut browsed_memory);
   system.main_loop(|_opened, ui, renderer, _display, framerate, key_events| {
-    let mut scroll_memory_to_pc = just_clicked_continue;
-    if auto_update_disasm_style {
-      browsed_memory.chunk_size = if gba.cpsr().thumb_state_flag() { 2 } else { 4 };
-    }
+    //let mut scroll_memory_to_pc = just_clicked_continue;
     if running {
       if !ui.io().want_capture_keyboard {
         for (key, state) in key_events {
@@ -213,6 +215,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           use imgui_winit_support::winit::keyboard::{KeyCode, PhysicalKey};
           match key {
             PhysicalKey::Code(KeyCode::Enter) => input_f(&mut gba, GBAButton::Start),
+            PhysicalKey::Code(KeyCode::KeyA) => input_f(&mut gba, GBAButton::ButtonA),
+            PhysicalKey::Code(KeyCode::KeyS) => input_f(&mut gba, GBAButton::ButtonB),
+            PhysicalKey::Code(KeyCode::KeyQ) => input_f(&mut gba, GBAButton::ButtonL),
+            PhysicalKey::Code(KeyCode::KeyW) => input_f(&mut gba, GBAButton::ButtonR),
             PhysicalKey::Code(KeyCode::ArrowLeft) => input_f(&mut gba, GBAButton::Left),
             PhysicalKey::Code(KeyCode::ArrowUp) => input_f(&mut gba, GBAButton::Up),
             PhysicalKey::Code(KeyCode::ArrowDown) => input_f(&mut gba, GBAButton::Down),
@@ -230,39 +236,43 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           ba.run_one_frame().unwrap();
         });
         */
-        let result = gba.run_one_frame();
+        let result = gba.run_one_frame().map(|_| true);
         post_exec(
           &gba,
           result,
-          auto_update_disasm_style,
           scroll_to_pc_on_break,
-          &mut scroll_memory_to_pc,
+          &mut scroll_to_addr,
+          &mut scroll_to_addr_target,
           &mut running,
           &mut browsed_memory,
         );
       } else {
-        let mut result = Ok(());
-        for _ in 0..5000 {
+        let mut result = Ok(false);
+        let mut frame_ended = false;
+        while !frame_ended {
           if !just_clicked_continue
-            && browsed_memory.breakpoints.iter().any(|x| *x == gba.registers()[15])
+            && browsed_memory.breakpoints.iter().any(|x| *x == gba.pc())
           {
             running = false;
-            scroll_memory_to_pc = true;
+            scroll_to_addr = true;
+            scroll_to_addr_target = gba.pc();
             break;
           }
           just_clicked_continue = false;
+
           result = gba.run_one_instruction();
-          if result.is_err() {
+          if result.is_err() { 
             break;
           }
+          frame_ended = result ==  Ok(true);
         }
-        gba.update_video_output();
+
         post_exec(
           &gba,
           result,
-          auto_update_disasm_style,
           scroll_to_pc_on_break,
-          &mut scroll_memory_to_pc,
+          &mut scroll_to_addr,
+          &mut scroll_to_addr_target,
           &mut running,
           &mut browsed_memory,
         );
@@ -302,7 +312,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.columns(2, "a", true);
         let cpsr = gba.cpsr();
         ui.text(format!(
-          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}\n{}",
+          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}\n{}\nclocks:{}\nscanline:{}\nppu_dot:{}",
           cpsr.negative_flag(),
           cpsr.carry_flag(),
           cpsr.zero_flag(),
@@ -311,9 +321,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           cpsr.fiq_disabled_flag(),
           cpsr.thumb_state_flag(),
           cpsr.mode(),
-          cpsr.mode()
+          cpsr.mode(),
+          gba.clocks(),
+          gba.clocks() / CLOCKS_PER_SCANLINE,
+          gba.clocks() / CLOCKS_PER_PIXEL
         ));
-        ui.set_column_offset(1, 110.0);
+        ui.set_column_offset(1, 130.0);
         ui.next_column();
         const REGISTER_NAMES: [&str; 16] = [
           "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
@@ -352,6 +365,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.button_with_size(stop_continue_icon, icon_size) {
           running = !running;
           just_clicked_continue = running;
+          if (!running) {
+            scroll_to_addr = true;
+            scroll_to_addr_target = gba.pc();
+          }
         }
         ui.same_line();
         ui.text(if running { "Stop" } else { "Continue" });
@@ -360,13 +377,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           fn run_n_times(
             gba: &mut GBABox,
             n: usize,
-            auto_update_disasm_style: bool,
             scroll_to_pc_on_break: bool,
-            scroll_memory_to_pc: &mut bool,
+            scroll_to_addr: &mut bool,
+            scroll_to_addr_target: &mut u32,
             running: &mut bool,
             browsed_memory: &mut BrowsedMemory,
           ) {
-            let mut result = Ok(());
+            let mut result = Ok(false);
             for _ in 0..n {
               result = gba.run_one_instruction();
               if result.is_err() {
@@ -376,9 +393,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post_exec(
               gba,
               result,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              scroll_memory_to_pc,
+              scroll_to_addr,
+              scroll_to_addr_target,
               running,
               browsed_memory,
             );
@@ -387,9 +404,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               1,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -401,9 +418,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               10,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -415,9 +432,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               100,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -429,9 +446,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               1000,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -443,9 +460,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               10000,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -457,9 +474,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               100_000,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -471,9 +488,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             run_n_times(
               &mut gba,
               variable_step as usize,
-              auto_update_disasm_style,
               scroll_to_pc_on_break,
-              &mut scroll_memory_to_pc,
+              &mut scroll_to_addr,
+              &mut scroll_to_addr_target,
               &mut running,
               &mut browsed_memory,
             );
@@ -482,8 +499,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           ui.same_line();
           ui.text("Step(");
           ui.same_line();
-          let _pushed_width = ui.push_item_width(120.0);
-          ui.input_int(")##7", &mut variable_step).step(0).build();
+          let _pushed_width = ui.push_item_width(200.0);
+          ui.input_int(")##7", &mut variable_step).step(1).build();
         }
         ui.separator();
         ui.text("Log Level");
@@ -503,23 +520,21 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         ui.separator();
         ui.separator();
-        scroll_memory_to_pc |= ui.small_button("Goto PC");
+        if ui.small_button("Goto PC") {
+          scroll_to_addr = true;
+          scroll_to_addr_target = gba.pc();
+        }
         ui.checkbox("Scroll on brk", &mut scroll_to_pc_on_break);
-        ui.checkbox("Auto-update disasm style", &mut auto_update_disasm_style);
         if ui.small_button("Clear Logs") {
           unsafe { &mut *GBA_LOGS.as_mut().unwrap().get() }.clear();
         }
-        if ui.small_button("Copy mesen-style logs") {
-          let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
-
-          let logstring = logs
-            .iter()
-            .rev()
-            .filter(|x| x.starts_with("R0"))
-            .map::<&str, _>(|x| &*x)
-            .collect::<String>();
-          copypasta::ClipboardContext::new().unwrap().set_contents(logstring);
+        if ui.small_button("Go to addr ") {
+          scroll_to_addr = true;
+          scroll_to_addr_target = go_to_addr_target;
         }
+        ui.same_line();
+        let _pushed_width = ui.push_item_width(200.0);
+        ui.input_scalar("###91283", &mut go_to_addr_target).display_format("%08X").flags(InputTextFlags::CHARS_HEXADECIMAL).step(1).build();
       });
     ui.window("ROM Loading")
       .position([420.0, 0.0], Condition::Appearing)
@@ -602,6 +617,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.radio_button("THUMB style", &mut browsed_memory.chunk_size, 2) {
           update_currently_browsed_memory_string(&gba, &mut browsed_memory);
         }
+        ui.same_line();
+        if ui.radio_button("Auto", &mut browsed_memory.chunk_size, 0) {
+          update_currently_browsed_memory_string(&gba, &mut browsed_memory);
+        }
         ui.separator();
         if ui.radio_button("Big Endian", &mut browsed_memory.is_little_endian, false) {
           update_currently_browsed_memory_string(&gba, &mut browsed_memory);
@@ -635,9 +654,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             ui.next_column();
             ui.text("Assembly");
             ui.next_column();
-            if scroll_memory_to_pc {
-              let pc = gba.registers()[15];
-              let region = match pc {
+            if scroll_to_addr {
+              let region = match scroll_to_addr_target {
                 0..=0x01FF_FFFF => BrowsableMemory::BIOS,
                 0x0200_0000..=0x02FF_FFFF => BrowsableMemory::BoardWRAM,
                 0x0300_0000..=0x03FF_FFFF => BrowsableMemory::ChipWRAM,
@@ -648,19 +666,23 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 _ => BrowsableMemory::ROM,
               };
               browsed_memory.mem = region;
-              browsed_memory.rom_cursor = pc;
+              browsed_memory.rom_cursor = scroll_to_addr_target;
               (&gba, &mut browsed_memory);
             }
             let (contents, breakpoints) =
               (&mut browsed_memory.contents, &mut browsed_memory.breakpoints);
-            let mut pc = gba.registers()[15];
-            let chunk_size = browsed_memory.chunk_size as u32;
+            let pc = gba.pc();
+            let mut chunk_size = browsed_memory.chunk_size as u32;
+            if chunk_size == 0 {
+              chunk_size  = if gba.cpsr().thumb_state_flag() { 2 } else { 4 };
+            }
             for (addr_string, value, disassembly, addr_u32, checkpoint_set) in contents {
-              let this_line_is_current_pc = pc >= *addr_u32 && pc < (*addr_u32 + chunk_size);
-              if scroll_memory_to_pc && this_line_is_current_pc {
-                scroll_memory_to_pc = false;
+              let this_line_is_scroll_target = scroll_to_addr_target >= *addr_u32 && scroll_to_addr_target < (*addr_u32 + chunk_size);
+              if scroll_to_addr && this_line_is_scroll_target {
+                scroll_to_addr = false;
                 unsafe { imgui::sys::igSetScrollHereY(0.0) };
               }
+              let this_line_is_current_pc = pc >= *addr_u32 && pc < (*addr_u32 + chunk_size);
               if this_line_is_current_pc {
                 ui.selectable_config("###331")
                   //.size([400.0, 20.0])
@@ -706,6 +728,31 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if ui.button("Copy") {
               ui.close_current_popup();
               ui.set_clipboard_text(log_line);
+            }
+            if ui.button("Copy all") {
+              ui.close_current_popup();
+
+              let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
+              let logstring = logs
+                .iter()
+                .rev()
+                .map::<&str, _>(|x| &*x)
+                .intersperse("\n")
+                .collect::<String>();
+              ui.set_clipboard_text(logstring);
+            }
+            if ui.button("Copy all mesen-style") {
+              ui.close_current_popup();
+              
+              let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
+              let logstring = logs
+                .iter()
+                .rev()
+                .filter(|x| x.starts_with("R0"))
+                .map::<&str, _>(|x| x.split("\n").next().unwrap())
+                .intersperse("\n")
+                .collect::<String>();
+              ui.set_clipboard_text(logstring);
             }
             popup_tok.end();
           }
