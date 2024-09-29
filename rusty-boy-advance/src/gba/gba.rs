@@ -338,8 +338,7 @@ impl GBA {
       0x05 => self.palette_ram[(addr & 0x0000_03FF) as usize],
       // VRAM - Video RAM          (96 KBytes)
       //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
-      //0x06 => self.vram[(addr & 0x00FF_FFFF) as usize],
-      0x06 => self.vram[(addr & 0x0001_7FFF) as usize],
+      0x06 => self.vram[(addr & 0x0001_FFFF) as usize],
       // OAM - OBJ Attributes      (1 Kbyte)
       0x07 => self.oam[(addr & 0x0000_03FF) as usize],
       // External Memory (Game Pak)
@@ -734,7 +733,6 @@ impl GBA {
     output_texture[(idx * 3) + 2] = col5_to_col8(b);
   }
   pub(crate) fn draw_scanline(&mut self, scanline: u32) {
-    return;
     let display_control = self.fetch_u16(DISPCNT_ADDR);
     let bg_mode = display_control & 0x0000_0007;
     if bg_mode != 0 {
