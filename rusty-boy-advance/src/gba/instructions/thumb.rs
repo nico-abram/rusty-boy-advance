@@ -402,9 +402,11 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       gba.regs[rd] = if rd == 15 { gba.regs[rs] & 0xFFFF_FFFE } else { gba.regs[rs] };
       gba.clocks += gba.sequential_cycle()
         + if rd == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
+      /*
       if let Some(f) = gba.debug_print_fn {
         f(format!("MOV x:{:08X} rd:{:08X}", x, gba.regs[rd]).as_str());
       }
+      */
     }
     3 => {
       // Ignore BLX since it's ARMv9
@@ -413,6 +415,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       let rs_val = gba.regs[rs];
       let thumb = (rs_val & 0x0000_0001) != 0;
       gba.cpsr.set_thumb_state_flag(thumb);
+      let old_pc = gba.regs[15];
       //if !thumb {
       if rs == 15 {
         // Likely wrong (The +4)
@@ -420,9 +423,20 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       } else {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
       }
+
+      if let Some(f) = gba.branch_print_fn {
+        f(format!(
+          "POP instcount:{} r15(thumb) pc:{:08X} target:{:08X} to_thumb:{} R{}:{:08}",
+          gba.executed_instructions_count,
+          old_pc, gba.regs[15], thumb, rs, rs_val
+        )
+        .as_str());
+      }
+      /*
       if let Some(f) = gba.debug_print_fn {
         f(format!("BLX rs_val:{:08X} pc:{:08X}", rs_val, gba.regs[15]).as_str());
       }
+      */
       gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
     }
     _ => std::unreachable!(), // It's 2 bits
@@ -645,7 +659,13 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
       n += 1;
     }
     if pc_or_lr_flag {
-      gba.regs[15] = gba.fetch_u32(sp) & (!0x0000_0001); // POP PC
+      let new_pc = gba.fetch_u32(sp) & (!0x0000_0001);
+      if let Some(f) = gba.branch_print_fn {
+        f(format!("POP instcount:{} r15(thumb) pc:{:08X} target:{:08X}",
+        gba.executed_instructions_count, gba.regs[15], new_pc).as_str());
+      }
+
+      gba.regs[15] = new_pc; // POP PC
       sp = sp.overflowing_add(4).0;
       n += 1;
     }
@@ -724,11 +744,17 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
     return Ok(());
   }
 
+  let pc = gba.regs[15];
   gba.regs[15] = if is_negative {
-    gba.regs[15].overflowing_sub((!offset) & 0x0000_00FE).0
+    pc.overflowing_sub((!offset) & 0x0000_00FE).0
   } else {
-    gba.regs[15].overflowing_add(offset.overflowing_add(2).0).0
+    pc.overflowing_add(offset.overflowing_add(2).0).0
   };
+
+  if let Some(f) = gba.branch_print_fn {
+    f(format!("BCOND(thumb) instcount:{} pc:{:08X} target:{:08X}",
+    gba.executed_instructions_count, pc, gba.regs[15]).as_str());
+  }
 
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
 
@@ -758,6 +784,11 @@ fn branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
     pc.overflowing_add(absolute_offset).0.overflowing_add(2).0
   };
 
+  if let Some(f) = gba.branch_print_fn {
+    f(format!("B(thumb) instcount:{} pc:{:08X} target:{:08X}", 
+    gba.executed_instructions_count,pc, gba.regs[15]).as_str());
+  }
+
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
 
   Ok(())
@@ -783,9 +814,20 @@ fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16
   //let H = as_11th_bit(opcode);// I *think* this is not needed since it's ARM9 (BLX)
   let lower_offset = u32::from(as_low_11bits(opcode) << 1);
   let pc = gba.regs[15];
+  let target_pc = gba.regs[14].overflowing_add(lower_offset).0;
+  let new_lr = pc | 0x1;
 
-  gba.regs[15] = gba.regs[14].overflowing_add(lower_offset).0;
-  gba.regs[14] = pc | 0x1;
+  if let Some(f) = gba.branch_print_fn {
+    f(format!(
+      "BL(thumb) instcount:{} pc:{:08X} target:{:08X} old_lr:{:08X} new_lr:{:08X}",
+      gba.executed_instructions_count,
+      pc, target_pc, gba.regs[14], new_lr
+    )
+    .as_str());
+  }
+
+  gba.regs[15] = target_pc;
+  gba.regs[14] = new_lr;
 
   gba.clocks += gba.sequential_cycle() + gba.nonsequential_cycle();
 

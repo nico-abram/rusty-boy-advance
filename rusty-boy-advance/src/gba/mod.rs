@@ -1,5 +1,6 @@
 mod cpsr;
 mod cpu_mode;
+mod draw;
 #[allow(clippy::module_inception)]
 mod gba;
 mod instructions;
@@ -8,7 +9,9 @@ mod utils;
 
 pub use cpsr::CPSR;
 pub use cpu_mode::CpuMode;
-pub use gba::{GBAButton, GBAError, LogLevel, GBA};
+pub use gba::{
+  CLOCKS_PER_FRAME, CLOCKS_PER_PIXEL, CLOCKS_PER_SCANLINE, GBA, GBAButton, GBAError, LogLevel,
+};
 pub use rom::Rom;
 
 use alloc::boxed::Box;
@@ -68,6 +71,10 @@ impl GBABox {
     self.regs
   }
 
+  pub fn pc(&self) -> u32 {
+    self.regs[15]
+  }
+
   /// Get the current Program Status Register
   pub fn cpsr(&self) -> CPSR {
     self.cpsr
@@ -102,6 +109,18 @@ impl GBABox {
     } else {
       Some(self.spsrs[self.cpsr.mode().as_usize() - 1])
     }
+  }
+
+  pub fn run_one_instruction(&mut self) -> Result<bool, GBAError> {
+    let ret = self.internal_gba.run_one_instruction();
+
+    let mut frame_ended = false;
+    if self.internal_gba.clocks >= gba::CLOCKS_PER_FRAME {
+      self.clocks -= gba::CLOCKS_PER_FRAME;
+      self.internal_gba.write_u16(gba::KEY_STATUS_REG, !self.internal_gba.persistent_input_bitmask);
+      frame_ended = true;
+    }
+    ret.map(|_| frame_ended)
   }
 }
 

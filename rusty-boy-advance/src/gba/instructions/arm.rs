@@ -150,6 +150,14 @@ fn branch_and_exchange(gba: &mut GBA, opcode: u32) -> ARMResult {
     gba.cpsr.set_thumb_state_flag(true);
   }
 
+  if let Some(f) = gba.branch_print_fn {
+    f(format!(
+      "BX instcount:{} pc:{:08X} jmp_target:{:08X} switch_to_thumb:{}",
+      gba.executed_instructions_count, gba.regs[15], jmp_addr, switch_to_thumb
+    )
+    .as_str());
+  }
+
   gba.regs[15] = jmp_addr;
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
   Ok(())
@@ -165,16 +173,34 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
   let is_branch_and_link = (opcode & 0x0100_0000) != 0;
 
   let pc = gba.regs[15];
-  if is_branch_and_link {
-    gba.regs[14] = pc;
-  }
-  gba.regs[15] = 4u32
+  let target_pc = 4u32
     .overflowing_add(if is_positive {
       pc.overflowing_add(offset).0
     } else {
       pc.overflowing_sub(!(offset | 0xFF00_0003) + 4).0
     })
     .0;
+
+  if let Some(f) = gba.branch_print_fn {
+    if is_branch_and_link {
+      f(format!(
+        "BL instcount:{} pc:{:08X} old_LR:{:08X} jmp_target:{:08X} ",
+        gba.executed_instructions_count, gba.regs[15], gba.regs[14], target_pc
+      )
+      .as_str());
+    } else {
+      f(format!(
+        "B instcount:{} pc:{:08X} jmp_target:{:08X}",
+        gba.executed_instructions_count, gba.regs[15], target_pc
+      )
+      .as_str());
+    }
+  }
+
+  if is_branch_and_link {
+    gba.regs[14] = pc;
+  }
+  gba.regs[15] = target_pc;
 
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
 
@@ -183,8 +209,18 @@ fn branch_or_branch_and_link(gba: &mut GBA, opcode: u32) -> ARMResult {
 /// Software Interrupt (SWI)
 ///
 /// Used to call BIOS functions
-pub(crate) fn software_interrupt(gba: &mut GBA, _: u32) -> ARMResult {
+pub(crate) fn software_interrupt(gba: &mut GBA, opcode: u32) -> ARMResult {
   let ret_pc = gba.regs[15];
+
+  if let Some(f) = gba.branch_print_fn {
+    f(format!(
+      "SWI instcount:{} pc:{:08X} comment:{:06X}",
+      gba.executed_instructions_count,
+      ret_pc,
+      opcode & 0xFF_FFFF
+    )
+    .as_str());
+  }
 
   let old_cpsr = gba.cpsr;
   gba.spsrs[CpuMode::Supervisor.as_usize() - 1] = old_cpsr;
@@ -943,17 +979,17 @@ fn move_to_register_from_status_register(gba: &mut GBA, opcode: u32) -> ARMResul
 
 /// Coprocessor Data Transfer (CDT) (Unimplemented)
 fn coprocessor_data_transfer(_: &mut GBA, _: u32) -> ARMResult {
-  unimplemented!("Coprocessor instructions are not supported")
+  Err(format!("Coprocessor instructions are not supported"))
 }
 
 /// Coprocessor Data Operation (CDO) (Unimplemented)
 fn coprocessor_data_operation(_: &mut GBA, _: u32) -> ARMResult {
-  unimplemented!("Coprocessor instructions are not supported")
+  Err(format!("Coprocessor instructions are not supported"))
 }
 
 /// Coprocessor Register Transfer (CRT) (Unimplemented)
 fn coprocessor_register_transfer(_: &mut GBA, _: u32) -> ARMResult {
-  unimplemented!("Coprocessor instructions are not supported")
+  Err(format!("Coprocessor instructions are not supported"))
 }
 
 /// Map an opcode to an instruction (An fn(&mut GBA, u32))
