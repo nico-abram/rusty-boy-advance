@@ -84,7 +84,7 @@ fn update_currently_browsed_memory_string(gba: &GBABox, mem: &mut BrowsedMemory)
   for (chunk_idx, chunks) in get_memory(gba, mem.mem, offs).chunks(chunk_size).enumerate() {
     let addr = ((chunk_idx * chunk_size) as u32) + offset(mem.mem, offs);
     mem.contents.push((
-      ImString::new(format!("{:08x}:", addr)),
+      ImString::new(format!("{:08x}", addr)),
       (if !mem.is_little_endian {
         chunks.iter().rev().map(|x| format!("{:02x}", x)).collect::<Vec<_>>()
       } else {
@@ -140,6 +140,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   const WIDTH: u32 = 240;
   const HEIGHT: u32 = 160;
   let mut log_level = LogLevel::None;
+  let mut log_control_flow = false;
   let mut gba = GBABox::new(log_level, None, Some(push_log));
   let mut system = support::init("Rusty Boy Advance ImGui");
   let gl_texture = {
@@ -163,7 +164,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut go_to_addr_target = 0;
   let mut browsed_memory = BrowsedMemory {
     mem: BrowsableMemory::BIOS,
-    chunk_size: 4,
+    chunk_size: 0,
     auto_update: true,
     contents: Vec::with_capacity(1024 * 1024 * 16),
     breakpoints: Vec::new(),
@@ -312,7 +313,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.columns(2, "a", true);
         let cpsr = gba.cpsr();
         ui.text(format!(
-          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}\n{}\nclocks:{}\nscanline:{}\nppu_dot:{}",
+          "N:{} \nC:{} \nZ:{} \nV:{} \nI:{} \nF:{} \nT:{} \nmode:{:x}\n{}\nclocks:{}\nscanline:{}\nppu_dot:{}\nhalted:{}",
           cpsr.negative_flag(),
           cpsr.carry_flag(),
           cpsr.zero_flag(),
@@ -324,9 +325,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           cpsr.mode(),
           gba.clocks(),
           gba.clocks() / CLOCKS_PER_SCANLINE,
-          gba.clocks() / CLOCKS_PER_PIXEL
+          gba.clocks() / CLOCKS_PER_PIXEL,
+          gba.halted()
         ));
-        ui.set_column_offset(1, 130.0);
+        ui.set_column_offset(1, 145.0);
         ui.next_column();
         const REGISTER_NAMES: [&str; 16] = [
           "a1", "a2", "a3", "a4", "v1", "v2", "v3", "v4", "v5", "sb", "sl", "fp", "ip", "sp", "lr",
@@ -515,8 +517,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.radio_button("Debug", &mut log_level, LogLevel::Debug) {
           gba.set_log_level(log_level);
         }
+        /*
         if ui.radio_button("CFlow", &mut log_level, LogLevel::ControlFlow) {
           gba.set_log_level(log_level);
+        }
+        */
+        ui.separator();
+        if ui.checkbox("CFlow", &mut log_control_flow) {
+          gba.enable_control_flow_logs(log_control_flow);
         }
         ui.separator();
         ui.separator();
@@ -692,15 +700,33 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 ui.set_item_allow_overlap();
               }
               ui.next_column();
-              if ui.checkbox(addr_string, checkpoint_set) {
+              let id = ui.push_id_int(*addr_u32 as i32);
+              if ui.checkbox( <ImString as AsRef<str>>::as_ref(addr_string), checkpoint_set) {
                 if *checkpoint_set {
                   breakpoints.push(*addr_u32);
                 } else {
                   breakpoints.retain(|x| *x != *addr_u32);
                 }
               }
+              if let Some(popup_tok) = ui.begin_popup_context_with_label("##pop_addr") {
+                if ui.button("Copy") {
+                  ui.close_current_popup();
+                  ui.set_clipboard_text(<ImString as AsRef<str>>::as_ref(addr_string));
+                }
+                popup_tok.end();
+              }
+              id.pop();
               ui.next_column();
-              ui.text(value);
+              let id = ui.push_id_int((*addr_u32 +1)as i32);
+              ui.text(<String as AsRef<str>>::as_ref(value));
+              if let Some(popup_tok) = ui.begin_popup_context_with_label("##pop_val") {
+                if ui.button("Copy") {
+                  ui.close_current_popup();
+                  ui.set_clipboard_text(value);
+                }
+                popup_tok.end();
+              }
+              id.pop();
               ui.next_column();
               ui.text(disassembly);
               ui.next_column();

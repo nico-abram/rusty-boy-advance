@@ -24,6 +24,11 @@ const FAST_INTERRUPT_HANDLER: u32 = 0x0000_001C;
 const INTERRUPT_ENABLE_REG_ADDR: u32 = 0x0400_0200;
 const INTERRUPT_ENABLE_MASTER_REG_ADDR: u32 = 0x0400_0208;
 const INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR: u32 = 0x0400_0202;
+const HALTCNT_REG_ADDR: u32 = 0x0400_0301;
+
+const INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX: usize =
+  (INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR - 0x0400_0000) as usize;
+const INTERRUPT_ENABLE_REG_IOMEMIDX: usize = (INTERRUPT_ENABLE_REG_ADDR - 0x0400_0000) as usize;
 
 pub const VIDEO_HEIGHT: usize = 160;
 pub const VIDEO_WIDTH: usize = 240;
@@ -155,6 +160,7 @@ pub struct GBA {
   /// ROM contents
   pub(crate) game_pak: Box<[u8; 32 * MB]>,
   pub(crate) game_pak_sram: [u8; 64 * KB],
+  pub(crate) bios_copy: [u8; 16 * KB],
   pub(crate) bios_rom: [u8; 16 * KB],
   pub(crate) wram_board: [u8; 256 * KB],
   pub(crate) wram_chip: [u8; 32 * KB],
@@ -171,6 +177,7 @@ pub struct GBA {
   pub(crate) branch_print_fn: Option<fn(&str) -> ()>,
   pub(crate) executed_instructions_count: u64,
   pub(crate) persistent_input_bitmask: u16,
+  halted: bool,
 }
 
 impl GBA {
@@ -188,6 +195,7 @@ impl GBA {
       spsrs: [CPSR(0_u32); 5],
       cpsr: CPSR(0_u32),
       bios_rom: [0_u8; 16 * KB],
+      bios_copy: [0_u8; 16 * KB],
       wram_board: [0_u8; 256 * KB],
       wram_chip: [0_u8; 32 * KB],
       palette_ram: [0_u8; KB],
@@ -205,17 +213,24 @@ impl GBA {
       print_fn,
       executed_instructions_count: 0,
       persistent_input_bitmask: 0x000,
+      halted: false,
     });
 
-    gba.reset();
-
-    //let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
     let bios_file = bios_file.unwrap_or(include_bytes!("gba_bios.bin"));
-    gba.bios_rom.clone_from_slice(bios_file);
+    gba.bios_copy.clone_from_slice(bios_file);
 
+    gba.reset();
     gba.set_log_level(log_level);
 
     gba
+  }
+
+  pub(crate) fn reload_bios(&mut self) {
+    self.bios_rom.clone_from_slice(&self.bios_copy[..]);
+  }
+
+  pub fn enable_control_flow_logs(&mut self, enable_interrupt_logs: bool) {
+    self.branch_print_fn = if enable_interrupt_logs { self.print_fn } else { None };
   }
 
   pub(crate) fn set_log_level(&mut self, log_level: LogLevel) {
@@ -250,7 +265,6 @@ impl GBA {
       LogLevel::None | LogLevel::ControlFlow => None,
     };
     self.debug_print_fn = if log_level == LogLevel::Debug { self.print_fn } else { None };
-    self.branch_print_fn = if log_level == LogLevel::ControlFlow { self.print_fn } else { None };
   }
 
   pub(crate) fn get_spsr_mut(&mut self) -> Option<&mut CPSR> {
@@ -403,6 +417,14 @@ impl GBA {
         if addr < (0x0400_0000 + 1022) {
           if addr & 0x04FF_FFFE == INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR {
             self.io_mem[(addr & 0x00FF_FFFF) as usize] &= !byte;
+          } else if addr == HALTCNT_REG_ADDR {
+            // HALTCNT
+            let is_stop = byte & 0x80 != 0;
+            if is_stop {
+              unimplemented!("STOP written to HALTCNT");
+            } else {
+              self.halted = true;
+            }
           } else {
             self.io_mem[(addr & 0x00FF_FFFF) as usize] = byte;
           }
@@ -475,6 +497,9 @@ impl GBA {
   }
 
   pub fn reset(&mut self) {
+    self.reload_bios();
+
+    self.halted = false;
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
     self.output_texture = [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
@@ -528,7 +553,7 @@ impl GBA {
 
   pub fn state_as_string_(&mut self) -> String {
     format!(
-      "{} CPSR:{:08X}\n{}",
+      "{} CPSR:{:08X}\n{} halted:{}",
       self
         .regs
         .iter()
@@ -541,12 +566,13 @@ impl GBA {
         .collect::<Vec<_>>()
         .join(" "),
       self.cpsr.0,
-      self.cpsr
+      self.cpsr,
+      self.halted
     )
   }
   pub fn state_as_string(&mut self) -> String {
     format!(
-      "{}\n{}",
+      "{}\n{} halted:{}",
       self
         .regs
         .iter()
@@ -562,16 +588,30 @@ impl GBA {
         ))
         .collect::<Vec<_>>()
         .join(" "),
-      self.cpsr
+      self.cpsr,
+      self.halted
     )
   }
 
   pub(crate) fn run_one_instruction(&mut self) -> Result<(), GBAError> {
+    let clocks_pre_exec = self.clocks;
+
+    if self.halted {
+      if self.io_mem[INTERRUPT_ENABLE_REG_IOMEMIDX]
+        & self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX]
+        != 0
+      {
+        self.halted = false;
+      } else {
+        self.clocks += 3;
+        self.update_hvblank(clocks_pre_exec);
+        return Ok(());
+      }
+    }
     if let Some(f) = self.instruction_hook {
       f(self);
     }
 
-    let clocks_pre_exec = self.clocks;
     if self.thumb() {
       thumb::execute_one_instruction(self).map_err(GBAError::Thumb)?;
     } else {
@@ -617,6 +657,9 @@ impl GBA {
   pub fn clocks(&self) -> u32 {
     self.clocks
   }
+  pub fn halted(&self) -> bool {
+    self.halted
+  }
 
   fn update_hvblank(&mut self, clocks_pre_exec: u32) {
     //let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
@@ -642,12 +685,10 @@ impl GBA {
     }
 
     if vcounter_flag && !vcounter_flag_pre {
-      let clocks = self.clocks;
       self.trigger_interrupt_if_enabled(VCOUNTER_IE_BIT);
     }
 
     if hblank && clocks_within_scanline_pre_exec < HBLANK_CYCLES {
-      let clocks = self.clocks;
       self.trigger_interrupt_if_enabled(HBLANK_IE_BIT);
     }
     if row_offset == NUM_REAL_SCANLINES && row_offset_pre_exec != NUM_REAL_SCANLINES {
@@ -693,6 +734,7 @@ impl GBA {
     output_texture[(idx * 3) + 2] = col5_to_col8(b);
   }
   pub(crate) fn draw_scanline(&mut self, scanline: u32) {
+    return;
     let display_control = self.fetch_u16(DISPCNT_ADDR);
     let bg_mode = display_control & 0x0000_0007;
     if bg_mode != 0 {
@@ -762,14 +804,19 @@ impl GBA {
 
       if full_palette {
         // 1 byte per pixel
-        for i in 0..64 {
+        for i in 0..8 {
+          let i = i + (scanline % 8) * 8;
+
           let palette_idx = gba.fetch_byte(tile_data_base_addr + tile_number + i) as usize;
           let color = u16::from(gba.palette_ram[palette_idx])
             + (u16::from(gba.palette_ram[palette_idx + 1]) << 8);
-          let px_idx = (screen_tile_x * 8
-            + (screen_tile_y * bg_x_tile_count * 8)
-            + (i % 8)
-            + (i / 8) * bg_x_tile_count * 8) as usize;
+
+          let px_y_idx = screen_tile_y * 8 + (i / 8);
+          if px_y_idx as u32 != scanline {
+            continue;
+          }
+
+          let px_idx = (screen_tile_x * 8 + (i % 8) + px_y_idx * bg_x_tile_count) as usize;
           if px_idx < (&gba.output_texture[..]).len() {
             Self::fill_output_color(&mut gba.output_texture[..], px_idx, color);
           }
@@ -781,7 +828,9 @@ impl GBA {
           // Each sub palette has 16 colors of 2 bytes each
           (palette_number * 16 * 2) as usize
         };
-        for i in 0..32u32 {
+        for i in 0..4u32 {
+          let i = i + (scanline % 8) * 4;
+
           let (mut px_x_within_tile, mut px_y_within_tile) = ((i & 0x3) * 2, (i >> 2));
 
           // TODO: Things seem to be wrong when moving along both ways mid-tile when flipping?
@@ -792,15 +841,15 @@ impl GBA {
             px_y_within_tile = 7 - px_y_within_tile;
           };
 
-          if screen_tile_y * TILE_HEIGHT + px_y_within_tile != scanline {
-            continue;
-          }
-
           let (px_x_idx, overflows_x) = ((px_x_within_tile + screen_tile_x * 8) as usize)
             .overflowing_sub(leftover_x_pxs_from_scroll as usize);
           let (px_y_idx, overflows_y) = ((px_y_within_tile + screen_tile_y * 8) as usize)
             .overflowing_sub(leftover_y_pxs_from_scroll as usize);
           if overflows_x || overflows_y {
+            continue;
+          }
+
+          if px_y_idx as u32 != scanline {
             continue;
           }
 
@@ -1080,22 +1129,31 @@ impl GBA {
     let bit = 1 << bit;
     let this_interrupt_enable = self.fetch_u16(INTERRUPT_ENABLE_REG_ADDR) & bit != 0;
 
-    const INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX: usize =
-      (INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR - 0x0400_0000) as usize;
-    let reg_if = self.fetch_u16(INTERRUPT_REQUEST_ACKNOWLEDGE_REG_ADDR);
+    let reg_if = (self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX] as u16)
+      | ((self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX + 1] as u16) << 8);
     let new_if = reg_if | bit as u16;
     self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX] = (new_if & 0xFF) as u8;
     self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX + 1] = ((new_if >> 8) & 0xFF) as u8;
 
-    if master_interrupt_enable && cpsr_interrupt_enable && this_interrupt_enable {
+    if master_interrupt_enable && this_interrupt_enable && cpsr_interrupt_enable {
       self.spsrs[CpuMode::IRQ.as_usize() - 1] = self.cpsr;
       let old_pc = self.regs[15];
       //let was_thumb = self.cpsr.thumb_state_flag();
       self.set_mode(CpuMode::IRQ);
       self.cpsr.set_irq_disabled_flag(true);
       self.cpsr.set_thumb_state_flag(false);
-      self.regs[14] = old_pc;
+      self.regs[14] = old_pc + 4;
       self.regs[15] = BIOS_INTERRUPT_HANDLER;
+
+      if let Some(branch_print_fn) = self.branch_print_fn {
+        branch_print_fn(&format!(
+          "interrupt requested serviced type:{bit:04X} old_pc:{old_pc:08X} old_if:{reg_if:08X} new_if:{new_if:08X}"
+        ));
+      }
+    } else {
+      if let Some(branch_print_fn) = self.branch_print_fn {
+        branch_print_fn(&format!("interrupt requested, not serviced type:{bit:04X}"));
+      }
     }
   }
 
