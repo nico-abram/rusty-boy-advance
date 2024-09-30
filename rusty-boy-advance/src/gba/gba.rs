@@ -422,7 +422,13 @@ impl GBA {
             if is_stop {
               unimplemented!("STOP written to HALTCNT");
             } else {
-              //self.halted = true;
+              if let Some(branch_print_fn) = self.branch_print_fn {
+                branch_print_fn(&format!(
+                  "HALT instcount:{} pc:{:08X}",
+                  self.executed_instructions_count, self.regs[15]
+                ));
+              }
+              self.halted = true;
             }
           } else {
             self.io_mem[(addr & 0x00FF_FFFF) as usize] = byte;
@@ -1194,6 +1200,7 @@ impl GBA {
       2 => |_, _| (),
       _ => std::panic!("Impossible"),
     };
+    let timing = (control_flags >> 12) & 0x3;
 
     if let Some(f) = self.debug_print_fn {
       f(format!(
@@ -1209,19 +1216,22 @@ impl GBA {
       .as_str());
     }
 
-    if size == 2 {
-      for _ in 0..count {
-        let byte = self.fetch_u16(source_addr);
-        self.write_u16(dest_addr, byte);
-        modifier_source(&mut source_addr, size);
-        modifier_dest(&mut dest_addr, size);
-      }
-    } else {
-      for _ in 0..count {
-        let byte = self.fetch_u32(source_addr);
-        self.write_u32(dest_addr, byte);
-        modifier_source(&mut source_addr, size);
-        modifier_dest(&mut dest_addr, size);
+    // TODO: VBlank/HBlank/Sound DMA
+    if timing != 3 {
+      if size == 2 {
+        for _ in 0..count {
+          let byte = self.fetch_u16(source_addr);
+          self.write_u16(dest_addr, byte);
+          modifier_source(&mut source_addr, size);
+          modifier_dest(&mut dest_addr, size);
+        }
+      } else {
+        for _ in 0..count {
+          let byte = self.fetch_u32(source_addr);
+          self.write_u32(dest_addr, byte);
+          modifier_source(&mut source_addr, size);
+          modifier_dest(&mut dest_addr, size);
+        }
       }
     }
 
@@ -1231,6 +1241,7 @@ impl GBA {
     }
 
     let irq = (control_flags & 0x4000) != 0;
+    // TODO: DMA IRQ
   }
 
   pub fn run_forever(&mut self) -> Result<(), GBAError> {

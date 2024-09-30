@@ -651,6 +651,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     ui.window("Memory Viewer")
       //.position([980.0, 0.0], Condition::Appearing)
       .always_auto_resize(true)
+      .focused(scroll_to_addr)
       .build(|| {
         if ui.radio_button("BIOS", &mut browsed_memory.mem, BrowsableMemory::BIOS) {
           update_currently_browsed_memory_string(&gba, &mut browsed_memory);
@@ -915,9 +916,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           style.pop();
         });
-        unsafe {
+      unsafe {
           imgui::sys::igSetNextWindowDockID(remainder_dock_id,  imgui::sys::ImGuiCond_Once as i32);
-        }
+      }
       ui.window("Tile viewer")
         //.position([0.0, 650.0], Condition::Appearing)
         //.size([400.0, 400.0], Condition::Appearing)
