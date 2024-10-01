@@ -1,5 +1,6 @@
 #![feature(iter_intersperse)]
 
+
 use capstone::prelude::*;
 use copypasta::ClipboardProvider;
 use glium::{
@@ -925,24 +926,24 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .build(|| {
           let mut force_update= false;
           ui.text("page");
-          force_update |= ui.radio_button("0", &mut tile_viewer_tile_page, 0) ;
+          force_update |= ui.radio_button("0##tile_page", &mut tile_viewer_tile_page, 0) ;
           ui.same_line();
-          force_update |= ui.radio_button("1", &mut tile_viewer_tile_page, 1) ;
+          force_update |= ui.radio_button("1##tile_page", &mut tile_viewer_tile_page, 1) ;
           ui.same_line();
-          force_update |= ui.radio_button("2", &mut tile_viewer_tile_page, 2) ;
+          force_update |= ui.radio_button("2##tile_page", &mut tile_viewer_tile_page, 2) ;
           ui.same_line();
-          force_update |= ui.radio_button("3", &mut tile_viewer_tile_page, 3) ;
+          force_update |= ui.radio_button("3##tile_page", &mut tile_viewer_tile_page, 3) ;
 
-          force_update |= ui.radio_button("BPP4", &mut tile_viewer_bpp8, false) ;
+          force_update |= ui.radio_button("BPP4##tile_bpp", &mut tile_viewer_bpp8, false) ;
           ui.same_line();
-          force_update |= ui.radio_button("BPP8", &mut tile_viewer_bpp8, true) ;
+          force_update |= ui.radio_button("BPP84##tile_bpp", &mut tile_viewer_bpp8, true) ;
           ui.text("palette");
           for i in 0..32 {
             ui.same_line();
             if i%8 == 0  {
               ui.new_line();
             }
-            force_update |= ui.radio_button(i.to_string(), &mut tile_viewer_palette, i) ;
+            force_update |= ui.radio_button(format!("{i}##palette_radio"), &mut tile_viewer_palette, i) ;
           }
           if ui.button("update") || force_update {
             // 32 for bpp4, 16 for bpp8
