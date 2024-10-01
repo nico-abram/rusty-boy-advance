@@ -1,5 +1,4 @@
-use std::format;
-use std::string::String;
+use std::{format, string::String};
 
 /// Utility impl on u8's for some kind of "bit pattern matching".
 ///
@@ -127,11 +126,7 @@ fn add_or_sub(opcode: u16) -> String {
 
   let verb = if is_substraction { "SUB" } else { "ADD" };
 
-  if immediate {
-    format!("{verb} R{rs}, #${rn:02X}")
-  } else {
-    format!("{verb} R{rs}, R{rn}")
-  }
+  if immediate { format!("{verb} R{rs}, #${rn:02X}") } else { format!("{verb} R{rs}, R{rn}") }
 }
 
 /// MOV ... ASR/LSL/LSR/ASR/RRX
@@ -174,8 +169,16 @@ fn pc_relative_load(opcode: u16) -> String {
 }
 
 /// LDR/STR
+/// 08000fac
 fn load_or_store_with_relative_offset(opcode: u16) -> String {
-  "LDR/STR?".into()
+  let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
+  let is_load_else_store = as_11th_bit(opcode);
+  let is_byte_else_word = (opcode & 0x0400) != 0;
+
+  let verb = if is_load_else_store { "LDR" } else { "STR" };
+  let byte_s = if is_byte_else_word { "B" } else { "" };
+
+  format!("{verb}{byte_s} R{rd}, [R{ro}+R{rb}]")
 }
 
 /// LDR/STR H/SB/SH
@@ -185,17 +188,43 @@ fn load_or_store_sign_extended_byte_or_halfword(opcode: u16) -> String {
 
 /// LDR/STR {B}
 fn load_or_store_with_immediate_offset(opcode: u16) -> String {
-  "LDR/STR {B}?".into()
+  let is_byte_else_word = (opcode & 0x1000) != 0;
+  let is_load_else_store = as_11th_bit(opcode);
+  let (_, _, rb, rd) = as_lower_3bit_values(opcode);
+  let mut offset = u32::from(as_bits_6_to_10(opcode));
+  if !is_byte_else_word {
+    offset = offset << 2;
+  }
+
+  let verb = if is_load_else_store { "LDR" } else { "STR" };
+  let byte_s = if is_byte_else_word { "B" } else { "" };
+
+  format!("{verb}{byte_s} R{rd}, [R{rb}+#${offset:04X}]")
 }
 
 /// LDR/STR H
 fn load_or_store_halfword(opcode: u16) -> String {
-  "LDR/STR H?".into()
+  let is_load_else_store = as_11th_bit(opcode);
+  let (_, _, rb, rd) = as_lower_3bit_values(opcode);
+  let offset = as_bits_6_to_10(opcode);
+  let offset = u32::from(offset) << 1;
+
+  let verb = if is_load_else_store { "LDRH" } else { "STRH" };
+
+  format!("{verb} R{rd}, [R{rb}+#${offset:04X}]")
 }
 
 /// LDR/STR SP
+/// 80016A0
 fn stack_pointer_relative_load_or_store(opcode: u16) -> String {
-  "LDR/STR SP?".into()
+  let is_load_else_store = as_11th_bit(opcode);
+  let byte = as_low_byte(opcode);
+  let offset = u32::from(byte) << 2;
+  let rd = as_bits_8_to_10(opcode);
+
+  let verb = if is_load_else_store { "LDR" } else { "STR" };
+
+  format!("{verb} R{rd}, [SP, #${offset:04X}]")
 }
 
 /// LOAD PC/SP
@@ -205,7 +234,14 @@ fn load_address(opcode: u16) -> String {
 
 /// ADD/SUB SP,nn
 fn add_or_sub_offset_to_stack_pointer(opcode: u16) -> String {
-  "ADD/SUB SP,nn?".into()
+  let byte = as_low_byte(opcode);
+  let substract_else_add = (byte & 0x80) != 0;
+  let byte7 = byte & 0x0000_007F;
+  let offset = u32::from(byte7) << 2;
+
+  let verb = if substract_else_add { "SUB" } else { "ADD" };
+
+  format!("{verb} SP,#${offset:08X}")
 }
 
 /// PUSH/POP
@@ -220,7 +256,8 @@ fn multiple_loads_or_stores(opcode: u16) -> String {
 
 /// SWI
 fn software_interrupt(opcode: u16) -> String {
-  "SWI".into()
+  let comment = opcode & 0xFF;
+  format!("SWI #${comment:08X}")
 }
 
 fn opcode_to_cond(opcode: u16) -> &'static str {
@@ -262,15 +299,21 @@ fn conditional_branch(opcode: u16) -> String {
 
 /// B
 fn branch(opcode: u16) -> String {
-  "B?".into()
+  let is_negative = (opcode & 0x0000_0400) != 0; // 11th bit
+  let absolute_offset = u32::from(opcode & 0x0000_03FF) << 1; // first 10 bits
+  let sign = if is_negative { "-" } else { "+" };
+
+  format!("B {sign}{absolute_offset:04X}")
 }
 
 /// BL/BLX
 fn branch_and_link_or_link_and_exchange_first_opcode(opcode: u16) -> String {
-  "BL/BLX?".into()
+  let upper_offset = as_low_11bits(opcode);
+  format!("BLL #${upper_offset:04X}")
 }
 
 /// BL/BLX
 fn branch_and_link_or_link_and_exchange_second_opcode(opcode: u16) -> String {
-  "BL/BLX?".into()
+  let lower_offset = as_low_11bits(opcode);
+  format!("BLH #${lower_offset:04X}")
 }
