@@ -427,8 +427,7 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       if let Some(f) = gba.branch_print_fn {
         f(format!(
           "POP instcount:{} r15(thumb) pc:{:08X} target:{:08X} to_thumb:{} R{}:{:08}",
-          gba.executed_instructions_count,
-          old_pc, gba.regs[15], thumb, rs, rs_val
+          gba.executed_instructions_count, old_pc, gba.regs[15], thumb, rs, rs_val
         )
         .as_str());
       }
@@ -661,8 +660,11 @@ fn push_or_pop(gba: &mut GBA, opcode: u16) -> ThumbResult {
     if pc_or_lr_flag {
       let new_pc = gba.fetch_u32(sp) & (!0x0000_0001);
       if let Some(f) = gba.branch_print_fn {
-        f(format!("POP instcount:{} r15(thumb) pc:{:08X} target:{:08X}",
-        gba.executed_instructions_count, gba.regs[15], new_pc).as_str());
+        f(format!(
+          "POP instcount:{} r15(thumb) pc:{:08X} target:{:08X}",
+          gba.executed_instructions_count, gba.regs[15], new_pc
+        )
+        .as_str());
       }
 
       gba.regs[15] = new_pc; // POP PC
@@ -752,8 +754,11 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   };
 
   if let Some(f) = gba.branch_print_fn {
-    f(format!("BCOND(thumb) instcount:{} pc:{:08X} target:{:08X}",
-    gba.executed_instructions_count, pc, gba.regs[15]).as_str());
+    f(format!(
+      "BCOND(thumb) instcount:{} pc:{:08X} target:{:08X}",
+      gba.executed_instructions_count, pc, gba.regs[15]
+    )
+    .as_str());
   }
 
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
@@ -763,7 +768,7 @@ fn conditional_branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
 
 /// SWI
 fn software_interrupt(gba: &mut GBA, opcode: u16) -> ThumbResult {
-  super::arm::software_interrupt(gba, u32::from(opcode) << 16)?;
+  super::arm::software_interrupt(gba, u32::from(opcode))?;
 
   //  TODO: This is wrong right? Already done in arm::software_interrupt
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
@@ -785,8 +790,11 @@ fn branch(gba: &mut GBA, opcode: u16) -> ThumbResult {
   };
 
   if let Some(f) = gba.branch_print_fn {
-    f(format!("B(thumb) instcount:{} pc:{:08X} target:{:08X}", 
-    gba.executed_instructions_count,pc, gba.regs[15]).as_str());
+    f(format!(
+      "B(thumb) instcount:{} pc:{:08X} target:{:08X}",
+      gba.executed_instructions_count, pc, gba.regs[15]
+    )
+    .as_str());
   }
 
   gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
@@ -820,8 +828,7 @@ fn branch_and_link_or_link_and_exchange_second_opcode(gba: &mut GBA, opcode: u16
   if let Some(f) = gba.branch_print_fn {
     f(format!(
       "BL(thumb) instcount:{} pc:{:08X} target:{:08X} old_lr:{:08X} new_lr:{:08X}",
-      gba.executed_instructions_count,
-      pc, target_pc, gba.regs[14], new_lr
+      gba.executed_instructions_count, pc, target_pc, gba.regs[14], new_lr
     )
     .as_str());
   }
