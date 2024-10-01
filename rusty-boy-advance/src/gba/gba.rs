@@ -36,7 +36,7 @@ pub const VIDEO_WIDTH: usize = 240;
 /// See [`GBAButton`].bit for button->bit mappings
 pub(crate) const KEY_STATUS_REG: u32 = 0x0400_0130;
 /// Display control (http://problemkaputt.de/gbatek.htm#lcdiodisplaycontrol)
-const DISPCNT_ADDR: u32 = 0x0400_0000;
+pub(crate) const DISPCNT_ADDR: u32 = 0x0400_0000;
 /// Display status (http://problemkaputt.de/gbatek.htm#lcdiointerruptsandstatus)
 const DISPSTAT_ADDR: u32 = 0x0400_0004;
 /// Scanline(Vertical) counter (http://problemkaputt.de/gbatek.htm#lcdiointerruptsandstatus)
@@ -487,6 +487,10 @@ impl GBA {
     self.fetch_u16_inline(addr)
   }
 
+  pub(crate) fn fetch_u16_vram(&mut self, addr: u32) -> u16 {
+    self.vram[addr as usize] as u16 + (self.vram[addr as usize + 1] as u16) << 8
+  }
+
   #[inline]
   pub(crate) fn fetch_u32_inline(&mut self, addr: u32) -> u32 {
     match addr {
@@ -685,9 +689,9 @@ impl GBA {
     let vcounter_flag = vcount_setting == row_offset;
     let vcounter_flag_pre = vcount_setting == row_offset_pre_exec;
 
-    if row_offset != row_offset_pre_exec && row_offset_pre_exec <= NUM_REAL_SCANLINES {
+    if row_offset != row_offset_pre_exec && row_offset_pre_exec < NUM_REAL_SCANLINES {
       for row in row_offset_pre_exec..row_offset {
-        self.draw_scanline(row as u32);
+        super::draw::draw_scanline(self, row as u32);
       }
     }
 
@@ -739,392 +743,13 @@ impl GBA {
     output_texture[(idx * 3) + 1] = col5_to_col8(g);
     output_texture[(idx * 3) + 2] = col5_to_col8(b);
   }
-  pub(crate) fn draw_scanline(&mut self, scanline: u32) {
-    let display_control = self.fetch_u16(DISPCNT_ADDR);
-    let bg_mode = display_control & 0x0000_0007;
-    if bg_mode != 0 {
-      return;
-    }
-
-    const TILE_WIDTH: u32 = 8;
-    const TILE_HEIGHT: u32 = 8;
-
-    let bg_num = 0;
-    const REG_BG0HOFS: u32 = 0x0400_0010;
-    const REG_BG0VOFS: u32 = 0x0400_0012;
-    let bg_hofs = REG_BG0HOFS + bg_num * 4;
-    let bg_vofs = REG_BG0VOFS + bg_num * 4;
-    let (scroll_x, scroll_y) =
-      ((self.fetch_u16(bg_hofs) & 0x1FF) as u32, (self.fetch_u16(bg_vofs) & 0x1FF) as u32);
-    let (bg_first_tile_x, bg_first_tile_y) = (scroll_x / 8, scroll_y / 8);
-    let (leftover_x_pxs_from_scroll, leftover_y_pxs_from_scroll) = (scroll_x % 8, (scroll_y % 8));
-
-    const BG0CNT: u32 = 0x0400_0008;
-    const BG1CNT: u32 = 0x0400_000A;
-    const BG2CNT: u32 = 0x0400_000C;
-    const BG3CNT: u32 = 0x0400_000E;
-    let bgcnt = BG0CNT + bg_num * 2;
-    let bg_control_flags = self.fetch_u16(bgcnt);
-
-    // The tile data contains colours, format depends on full palette
-    // (1 byte per colour) or not (4 bits a colour)
-    const TILE_DATA_PAGE_SIZE: u32 = 16 * 1024;
-    let tile_data_page = u32::from((bg_control_flags >> 2) & 0x3);
-    let tile_data_base_addr = 0x0600_0000 + tile_data_page * TILE_DATA_PAGE_SIZE;
-
-    // The tilemap contains the attributes for the tile(Like being flipped)
-    // and the tile index into the tile data
-    const TILE_MAP_PAGE_SIZE: u32 = 2 * 1024;
-    let tile_map_page = u32::from((bg_control_flags >> 8) & 0x1F);
-    let tile_map_base_addr = 0x0600_0000 + tile_map_page * TILE_MAP_PAGE_SIZE;
-
-    let full_palette = (bg_control_flags & 0x0000_0080) != 0;
-    let screen_size_flag = ((bg_control_flags >> 14) & 0x3) as usize;
-    let (bg_x_tile_count, bg_y_tile_count) = match screen_size_flag {
-      0 => (32, 32),
-      1 => (64, 32),
-      2 => (32, 64),
-      3 => (64, 64),
-      _ => std::unreachable!(),
-    };
-
-    let bytes_per_tile =
-      if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) };
-    let draw_tile = |gba: &mut GBA, bg_tile_x, bg_tile_y, screen_tile_x, screen_tile_y| {
-      // The math here is pretty weird. The way the tiles are laid out in memory seems to be
-      // the first (top-left) 32x32 tiles, then the bottom-left 32x32, then top-right
-      // then bottom-right
-      let tile_map_element_addr = tile_map_base_addr
-        + (((bg_tile_x & 0x1F) + bg_tile_y * bg_y_tile_count) * 2)
-        + if bg_tile_x >= 32 { 32 * bg_y_tile_count * 2 } else { 0 };
-
-      // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
-      let tile_map_element = u32::from(gba.fetch_u16(tile_map_element_addr));
-
-      let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
-      let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
-
-      let h_flip = (tile_map_element & 0x0000_0400) != 0;
-      let v_flip = (tile_map_element & 0x0000_0800) != 0;
-
-      if full_palette {
-        // 1 byte per pixel
-        for i in 0..64 {
-          let i = i;
-
-          let palette_idx = gba.fetch_byte(tile_addr + i) as usize;
-          let color = u16::from(gba.palette_ram[palette_idx])
-            + (u16::from(gba.palette_ram[palette_idx + 1]) << 8);
-
-          let px_y_idx = screen_tile_y * 8 + (i / 8);
-          if px_y_idx as u32 != scanline {
-            continue;
-          }
-
-          let px_idx = (screen_tile_x * 8 + (i % 8) + px_y_idx * bg_x_tile_count) as usize;
-          if px_idx < (&gba.output_texture[..]).len() {
-            Self::fill_output_color(&mut gba.output_texture[..], px_idx, color);
-          }
-        }
-      } else {
-        // 4 bits per pixel
-        let palette_base = {
-          let palette_number = (tile_map_element >> 12) & 0xF;
-          // Each sub palette has 16 colors of 2 bytes each
-          (palette_number * 16 * 2) as usize
-        };
-        for i in 0..32u32 {
-          let (mut px_x_within_tile, mut px_y_within_tile) = ((i & 0x3) * 2, (i >> 2));
-
-          // TODO: Things seem to be wrong when moving along both ways mid-tile when flipping?
-          // clarification: it is when we have a non zero scroll on x, and without moving through x we move
-          // through y, the left-most scrollx pixels are not being drawn to, it seems
-          // probably need to draw from 1 more tile?
-          if h_flip {
-            px_x_within_tile = 7 - px_x_within_tile;
-          };
-          if v_flip {
-            px_y_within_tile = 7 - px_y_within_tile;
-          };
-
-          let (px_x_idx, overflows_x) = ((px_x_within_tile + screen_tile_x * 8) as usize)
-            .overflowing_sub(leftover_x_pxs_from_scroll as usize);
-          let (px_y_idx, overflows_y) = ((px_y_within_tile + screen_tile_y * 8) as usize)
-            .overflowing_sub(leftover_y_pxs_from_scroll as usize);
-          if overflows_x || overflows_y {
-            continue;
-          }
-
-          if px_y_idx as u32 != scanline {
-            continue;
-          }
-
-          if px_y_idx >= VIDEO_HEIGHT {
-            continue;
-          }
-
-          // First 4 bits are the first px's palette idx, next 4 are the next color's
-          let (palette_idx1, palette_idx2) = {
-            let palette_idxs = gba.fetch_byte(tile_addr + i) as usize;
-            #[allow(clippy::identity_op)]
-            ((palette_idxs >> 0) & 0xF, (palette_idxs >> 4) & 0xF)
-          };
-
-          if px_x_idx < VIDEO_WIDTH {
-            let px_idx1 = px_x_idx.wrapping_add(px_y_idx * VIDEO_WIDTH);
-            let palette_idx1 =
-              if palette_idx1 != 0 { palette_base + (palette_idx1 * 2) } else { 0 };
-
-            let color = u16::from(gba.palette_ram[palette_idx1])
-              + (u16::from(gba.palette_ram[palette_idx1 + 1]) << 8);
-            Self::fill_output_color(&mut gba.output_texture[..], px_idx1, color);
-          }
-          if if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) } < VIDEO_WIDTH {
-            let px_idx2 = (if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) })
-              .wrapping_add(px_y_idx * VIDEO_WIDTH);
-            let palette_idx2 =
-              if palette_idx2 != 0 { palette_base + (palette_idx2 * 2) } else { 0 };
-            let color = u16::from(gba.palette_ram[palette_idx2])
-              + (u16::from(gba.palette_ram[palette_idx2 + 1]) << 8);
-            Self::fill_output_color(&mut gba.output_texture[..], px_idx2, color);
-          }
-        }
-      }
-    };
-    const SCREEN_Y_TILE_COUNT: u32 = (VIDEO_HEIGHT as u32) / TILE_HEIGHT;
-    const SCREEN_X_TILE_COUNT: u32 = (VIDEO_WIDTH as u32) / TILE_WIDTH;
-    // We use an extra one for the case were we are mid-scroll and are displaying N+1 tiles
-    let y = scanline / TILE_HEIGHT;
-    for y in 0..=SCREEN_Y_TILE_COUNT {
-      for x in 0..=SCREEN_X_TILE_COUNT {
-        draw_tile(
-          self,
-          (bg_first_tile_x + x) % bg_x_tile_count,
-          (bg_first_tile_y + y) % bg_y_tile_count,
-          x,
-          y,
-        );
-      }
-    }
-  }
 
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
   /// for details.
   #[allow(clippy::unused_unit)]
   pub(crate) fn update_video_output(&mut self) {
-    let display_control = self.fetch_u16(DISPCNT_ADDR);
-    let bg_mode = display_control & 0x0000_0007;
-    match bg_mode {
-      0 => {
-        const TILE_WIDTH: u32 = 8;
-        const TILE_HEIGHT: u32 = 8;
-
-        let bg_num = 0;
-        const REG_BG0HOFS: u32 = 0x0400_0010;
-        const REG_BG0VOFS: u32 = 0x0400_0012;
-        let bg_hofs = REG_BG0HOFS + bg_num * 4;
-        let bg_vofs = REG_BG0VOFS + bg_num * 4;
-        let (scroll_x, scroll_y) =
-          ((self.fetch_u16(bg_hofs) & 0x1FF) as u32, (self.fetch_u16(bg_vofs) & 0x1FF) as u32);
-        let (bg_first_tile_x, bg_first_tile_y) = (scroll_x / 8, scroll_y / 8);
-        let (leftover_x_pxs_from_scroll, leftover_y_pxs_from_scroll) =
-          (scroll_x % 8, (scroll_y % 8));
-
-        const BG0CNT: u32 = 0x0400_0008;
-        const BG1CNT: u32 = 0x0400_000A;
-        const BG2CNT: u32 = 0x0400_000C;
-        const BG3CNT: u32 = 0x0400_000E;
-        let bgcnt = BG0CNT + bg_num * 2;
-        let bg_control_flags = self.fetch_u16(bgcnt);
-
-        // The tile data contains colours, format depends on full palette
-        // (1 byte per colour) or not (4 bits a colour)
-        const TILE_DATA_PAGE_SIZE: u32 = 16 * 1024;
-        let tile_data_page = u32::from((bg_control_flags >> 2) & 0x3);
-        let tile_data_base_addr = 0x0600_0000 + tile_data_page * TILE_DATA_PAGE_SIZE;
-
-        // The tilemap contains the attributes for the tile(Like being flipped)
-        // and the tile index into the tile data
-        const TILE_MAP_PAGE_SIZE: u32 = 2 * 1024;
-        let tile_map_page = u32::from((bg_control_flags >> 8) & 0x1F);
-        let tile_map_base_addr = 0x0600_0000 + tile_map_page * TILE_MAP_PAGE_SIZE;
-
-        let full_palette = (bg_control_flags & 0x0000_0080) != 0;
-        let screen_size_flag = ((bg_control_flags >> 14) & 0x3) as usize;
-        let (bg_x_tile_count, bg_y_tile_count) = match screen_size_flag {
-          0 => (32, 32),
-          1 => (64, 32),
-          2 => (32, 64),
-          3 => (64, 64),
-          _ => std::unreachable!(),
-        };
-
-        let bytes_per_tile =
-          if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) };
-        let draw_tile = |gba: &mut GBA, bg_tile_x, bg_tile_y, screen_tile_x, screen_tile_y| {
-          // The math here is pretty weird. The way the tiles are laid out in memory seems to be
-          // the first (top-left) 32x32 tiles, then the bottom-left 32x32, then top-right
-          // then bottom-right
-          let tile_map_element_addr = tile_map_base_addr
-            + (((bg_tile_x & 0x1F) + bg_tile_y * bg_y_tile_count) * 2)
-            + if bg_tile_x >= 32 { 32 * bg_y_tile_count * 2 } else { 0 };
-
-          // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
-          let tile_map_element = u32::from(gba.fetch_u16(tile_map_element_addr));
-
-          let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
-          let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
-
-          let h_flip = (tile_map_element & 0x0000_0400) != 0;
-          let v_flip = (tile_map_element & 0x0000_0800) != 0;
-
-          if full_palette {
-            // 1 byte per pixel
-            for i in 0..64 {
-              let palette_idx = gba.fetch_byte(tile_data_base_addr + tile_number + i) as usize;
-              let color = u16::from(gba.palette_ram[palette_idx])
-                + (u16::from(gba.palette_ram[palette_idx + 1]) << 8);
-              let px_idx = (screen_tile_x * 8
-                + (screen_tile_y * bg_x_tile_count * 8)
-                + (i % 8)
-                + (i / 8) * bg_x_tile_count * 8) as usize;
-              if px_idx < (&gba.output_texture[..]).len() {
-                Self::fill_output_color(&mut gba.output_texture[..], px_idx, color);
-              }
-            }
-          } else {
-            // 4 bits per pixel
-            let palette_base = {
-              let palette_number = (tile_map_element >> 12) & 0xF;
-              // Each sub palette has 16 colors of 2 bytes each
-              (palette_number * 16 * 2) as usize
-            };
-            for i in 0..32u32 {
-              let (mut px_x_within_tile, mut px_y_within_tile) = ((i & 0x3) * 2, (i >> 2));
-
-              // TODO: Things seem to be wrong when moving along both ways mid-tile when flipping?
-              if h_flip {
-                px_x_within_tile = 7 - px_x_within_tile;
-              };
-              if v_flip {
-                px_y_within_tile = 7 - px_y_within_tile;
-              };
-
-              let (px_x_idx, overflows_x) = ((px_x_within_tile + screen_tile_x * 8) as usize)
-                .overflowing_sub(leftover_x_pxs_from_scroll as usize);
-              let (px_y_idx, overflows_y) = ((px_y_within_tile + screen_tile_y * 8) as usize)
-                .overflowing_sub(leftover_y_pxs_from_scroll as usize);
-              if overflows_x || overflows_y {
-                continue;
-              }
-
-              if px_y_idx >= VIDEO_HEIGHT {
-                continue;
-              }
-
-              // First 4 bits are the first px's palette idx, next 4 are the next color's
-              let (palette_idx1, palette_idx2) = {
-                let palette_idxs = gba.fetch_byte(tile_addr + i) as usize;
-                #[allow(clippy::identity_op)]
-                ((palette_idxs >> 0) & 0xF, (palette_idxs >> 4) & 0xF)
-              };
-
-              if px_x_idx < VIDEO_WIDTH {
-                let px_idx1 = px_x_idx.wrapping_add(px_y_idx * VIDEO_WIDTH);
-                let palette_idx1 =
-                  if palette_idx1 != 0 { palette_base + (palette_idx1 * 2) } else { 0 };
-
-                let color = u16::from(gba.palette_ram[palette_idx1])
-                  + (u16::from(gba.palette_ram[palette_idx1 + 1]) << 8);
-                Self::fill_output_color(&mut gba.output_texture[..], px_idx1, color);
-              }
-              if if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) } < VIDEO_WIDTH {
-                let px_idx2 = (if h_flip { px_x_idx - 1 } else { px_x_idx.saturating_add(1) })
-                  .wrapping_add(px_y_idx * VIDEO_WIDTH);
-                let palette_idx2 =
-                  if palette_idx2 != 0 { palette_base + (palette_idx2 * 2) } else { 0 };
-                let color = u16::from(gba.palette_ram[palette_idx2])
-                  + (u16::from(gba.palette_ram[palette_idx2 + 1]) << 8);
-                Self::fill_output_color(&mut gba.output_texture[..], px_idx2, color);
-              }
-            }
-          }
-        };
-        const SCREEN_Y_TILE_COUNT: u32 = (VIDEO_HEIGHT as u32) / TILE_HEIGHT;
-        const SCREEN_X_TILE_COUNT: u32 = (VIDEO_WIDTH as u32) / TILE_WIDTH;
-        // We use an extra one for the case were we are mid-scroll and are displaying N+1 tiles
-        for y in 0..=SCREEN_Y_TILE_COUNT {
-          for x in 0..=SCREEN_X_TILE_COUNT {
-            draw_tile(
-              self,
-              (bg_first_tile_x + x) % bg_x_tile_count,
-              (bg_first_tile_y + y) % bg_y_tile_count,
-              x,
-              y,
-            );
-          }
-        }
-      }
-      1 => (),
-      2 => (),
-      3 => {
-        // 16 bit color bitmap. One frame buffer (240x160 pixels, 32768 colors)
-        #[allow(clippy::match_ref_pats)]
-        for (idx, slice) in self.vram.chunks_exact(2).take(VIDEO_WIDTH * VIDEO_HEIGHT).enumerate() {
-          if let &[high_byte, low_byte] = slice {
-            let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
-            Self::fill_output_color(&mut self.output_texture[..], idx, color);
-          }
-        }
-      }
-      4 => {
-        // 8 bit palette indexed bitmap. Two frame buffers (240x160 pixels, 256 colors)
-        let second_frame = (self.io_mem[0] & 0x0000_0008) != 0;
-        for (idx, palette_idx) in self
-          .vram
-          .iter()
-          .skip(if second_frame { VIDEO_WIDTH * VIDEO_HEIGHT } else { 0 })
-          .take(VIDEO_WIDTH * VIDEO_HEIGHT)
-          .enumerate()
-        {
-          let palette_idx = (*palette_idx as usize) * 2;
-          let color = u16::from(self.palette_ram[palette_idx])
-            + (u16::from(self.palette_ram[palette_idx + 1]) << 8);
-          Self::fill_output_color(&mut self.output_texture[..], idx, color);
-        }
-      }
-      5 => {
-        // 16 bit color bitmap. Two frame buffers (160x128 pixels, 32768 colors)
-        const BGMODE5_WIDTH: usize = 160;
-        const BGMODE5_HEIGHT: usize = 128;
-        const BGMODE5_FRAMEBUFFER_PX_COUNT: usize = BGMODE5_WIDTH * BGMODE5_HEIGHT;
-        const BGMODE5_FIRST_X_PX: usize = (VIDEO_WIDTH - BGMODE5_WIDTH) / 2;
-        const BGMODE5_FIRST_Y_PX: usize = (VIDEO_HEIGHT - BGMODE5_HEIGHT) / 2;
-        let second_frame = (self.io_mem[0] & 0x0000_0008) != 0; // TODO: Is this right?
-        let mut iter = self
-          .vram
-          .chunks_exact(2)
-          .skip(if second_frame { BGMODE5_FRAMEBUFFER_PX_COUNT } else { 0 })
-          .take(BGMODE5_FRAMEBUFFER_PX_COUNT);
-        for x in 0..VIDEO_WIDTH {
-          for y in 0..VIDEO_HEIGHT {
-            let idx = x + y * VIDEO_WIDTH;
-            if x < BGMODE5_FIRST_X_PX
-              || x > BGMODE5_FIRST_X_PX + BGMODE5_WIDTH
-              || y < BGMODE5_FIRST_Y_PX
-              || y > BGMODE5_FIRST_Y_PX + BGMODE5_HEIGHT
-            {
-              // TODO: Is this right?
-              Self::fill_output_color(&mut self.output_texture[..], idx, u16::max_value());
-            } else if let &[high_byte, low_byte] = iter.next().unwrap() {
-              // TODO: Is this right?
-              let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
-              Self::fill_output_color(&mut self.output_texture[..], idx, color);
-            }
-          }
-        }
-      }
-      _ => (),
+    for i in 0..NUM_REAL_SCANLINES {
+      super::draw::draw_scanline(self, i as u32);
     }
   }
 
@@ -1198,7 +823,7 @@ impl GBA {
       0 => |source, size| *source += size,
       1 => |source, size| *source -= size,
       2 => |_, _| (),
-      _ => std::panic!("Impossible"),
+      _ => std::panic!("Unimplemented: Incremet/Reload Dest DMA"),
     };
     let timing = (control_flags >> 12) & 0x3;
 

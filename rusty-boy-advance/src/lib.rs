@@ -1,4 +1,5 @@
 #![feature(test)]
+#![feature(iterator_try_collect)]
 #![no_std]
 //#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 
