@@ -1,27 +1,23 @@
-use core::any;
-
 use super::gba::{GBA, VIDEO_HEIGHT, VIDEO_WIDTH};
 
 const TILE_WIDTH: u32 = 8;
 const TILE_HEIGHT: u32 = 8;
 
-const SCREEN_Y_TILE_COUNT: u32 = (VIDEO_HEIGHT as u32) / TILE_HEIGHT;
-const SCREEN_X_TILE_COUNT: u32 = (VIDEO_WIDTH as u32) / TILE_WIDTH;
-
 const REG_BG0HOFS: u32 = 0x0400_0010;
 const REG_BG0VOFS: u32 = 0x0400_0012;
+
 #[inline]
 fn bgscroll(gba: &mut GBA, bg_num: u32) -> (u32, u32) {
-  let (bg_hofs, bg_vofs) = (REG_BG0HOFS + bg_num * 4, REG_BG0VOFS + bg_num * 4);
-
-  ((gba.fetch_u16(bg_hofs) & 0x1FF) as u32, (gba.fetch_u16(bg_vofs) & 0x1FF) as u32)
+  (
+    fetch_u16_iomem(gba, REG_BG0HOFS + bg_num * 4) as u32,
+    fetch_u16_iomem(gba, REG_BG0VOFS + bg_num * 4) as u32,
+  )
 }
 
 const BG0CNT: u32 = 0x0400_0008;
 #[inline]
 fn bgcnt(gba: &mut GBA, bg_num: u32) -> u32 {
-  let bgcnt = BG0CNT + bg_num * 2;
-  gba.fetch_u16(bgcnt) as u32
+  fetch_u16_iomem(gba, BG0CNT + bg_num * 2) as u32
 }
 
 const TILE_MAP_PAGE_SIZE: u32 = 2 * 1024;
@@ -102,6 +98,11 @@ fn fetch_u16_palette_ram(gba: &GBA, addr: usize) -> u16 {
   fetch_u16(&gba.palette_ram[..], addr)
 }
 
+#[inline]
+fn fetch_u16_iomem(gba: &GBA, addr: u32) -> u16 {
+  fetch_u16(&gba.io_mem[..], (addr - 0x0400_0000) as usize)
+}
+
 pub fn get_tile(
   gba: &mut GBA,
   tile_page: u32,
@@ -142,14 +143,10 @@ pub fn get_mode0_bg_tile(
   tile_x: u32,
   tile_y: u32,
 ) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32) {
-  let (scroll_x, scroll_y) = bgscroll(gba, bg_num);
-  let (bg_first_tile_x, bg_first_tile_y) = (scroll_x / 8, scroll_y / 8);
-  let (leftover_x_pxs_from_scroll, leftover_y_pxs_from_scroll) = (scroll_x % 8, (scroll_y % 8));
-
   let background_control_flags = bgcnt(gba, bg_num);
   let (
-    priority,
-    mosaic,
+    _priority,
+    _mosaic,
     tile_data_base_addr,
     tile_map_base_addr,
     full_palette,
@@ -282,125 +279,98 @@ pub fn draw_mode0_bg_tile_hstrip<const USE_GBA_TEXTURE: bool>(
 }
 
 fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
-  let bg_num = 0;
+  let bg_data_arr: [_; 4] = std::array::from_fn(|bg_num| {
+    let bg_num: u32 = bg_num as u32;
+    let bg_ctrl_flags = bgcnt(gba, bg_num);
 
-  let bg_hofs = REG_BG0HOFS + bg_num * 4;
-  let bg_vofs = REG_BG0VOFS + bg_num * 4;
-  let (scroll_x, scroll_y) =
-    ((gba.fetch_u16(bg_hofs) & 0x1FF) as u32, (gba.fetch_u16(bg_vofs) & 0x1FF) as u32);
-  let (bg_first_tile_x, bg_first_tile_y) = (scroll_x / 8, scroll_y / 8);
-  let (leftover_x_pxs_from_scroll, leftover_y_pxs_from_scroll) = (scroll_x % 8, (scroll_y % 8));
+    let (scroll_x, scroll_y) = bgscroll(gba, bg_num);
 
-  const BG0CNT: u32 = 0x0400_0008;
-  const BG1CNT: u32 = 0x0400_000A;
-  const BG2CNT: u32 = 0x0400_000C;
-  const BG3CNT: u32 = 0x0400_000E;
-  //let bgcnt = BG0CNT + bg_num * 2;
-  //let bg_control_flags = gba.fetch_u16(bgcnt);
+    let (
+      priority,
+      _mosaic,
+      tile_data_base_addr,
+      tile_map_base_addr,
+      full_palette,
+      (bg_tile_count_x, bg_tile_count_y),
+    ) = parse_bgcnt(bg_ctrl_flags);
+    // array indexed by 32x32 bg slice (also called a screenblock)
+    // indices:
+    // [00 11]
+    // [22 33]
+    let tile_map_base_addrs = if bg_tile_count_x == 32 && bg_tile_count_y == 32 {
+      [tile_map_base_addr, tile_map_base_addr, tile_map_base_addr, tile_map_base_addr]
+    } else if bg_tile_count_x == 64 && bg_tile_count_y == 64 {
+      [
+        tile_map_base_addr,
+        tile_map_base_addr + 0x800,
+        tile_map_base_addr + (0x800 * 2),
+        tile_map_base_addr + (0x800 * 3),
+      ]
+    } else if bg_tile_count_x == 64 && bg_tile_count_y == 32 {
+      [
+        tile_map_base_addr,
+        tile_map_base_addr + 0x800,
+        tile_map_base_addr,
+        tile_map_base_addr + 0x800,
+      ]
+    } else {
+      // x 32 y 64
+      [
+        tile_map_base_addr,
+        tile_map_base_addr,
+        tile_map_base_addr + 0x800,
+        tile_map_base_addr + 0x800,
+      ]
+    };
 
-  let bg_control_flags =
-    [gba.fetch_u16(BG0CNT), gba.fetch_u16(BG1CNT), gba.fetch_u16(BG2CNT), gba.fetch_u16(BG3CNT)];
-
-  // The tile data contains colours, format depends on full palette
-  // (1 byte per colour) or not (4 bits a colour)
-  //let tile_data_page = u32::from((bg_control_flags >> 2) & 0x3);
-  //let tile_data_base_addr = tile_data_page * TILE_DATA_PAGE_SIZE;
-  let tile_data_base_addrs = bg_control_flags.map(|bgcnt| {
-    let tile_data_page = u32::from((bgcnt >> 2) & 0x3);
-    tile_data_page * TILE_DATA_PAGE_SIZE
+    (priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y))
   });
 
   // 4 is a sentinel value indicating no bg
   let mut bgs_to_draw = [4, 4, 4, 4, 4, 4];
-  for (idx, bgcnt) in bg_control_flags.iter().enumerate() {
+  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
     if display_control & (1 << (8 + idx)) != 0 {
-      let priority = *bgcnt & 0x3;
-      if bgs_to_draw[priority as usize] == 4 {
-        bgs_to_draw[priority as usize] = idx;
+      let priority = bg_data.0 as usize;
+      if bgs_to_draw[priority] == 4 {
+        bgs_to_draw[priority] = idx;
       } else if bgs_to_draw[priority as usize + 1] == 4 {
-        bgs_to_draw[priority as usize + 1] = idx;
+        bgs_to_draw[priority + 1] = idx;
       } else if bgs_to_draw[priority as usize + 2] == 4 {
-        bgs_to_draw[priority as usize + 2] = idx;
+        bgs_to_draw[priority + 2] = idx;
       } else {
         unimplemented!("matching BG priority is unimplemented")
       }
     }
   }
 
-  // The tilemap contains the attributes for the tile(Like being flipped)
-  // and the tile index into the tile data
-  //let tile_map_page = u32::from((bg_control_flags >> 8) & 0x1F);
-  //let tile_map_base_addr = tile_map_page * TILE_MAP_PAGE_SIZE;
-
-  //let full_palette = (bg_control_flags & 0x0000_0080) != 0;
-  let full_palette_bools = bg_control_flags.map(|bgcnt| (bgcnt & 0x0000_0080) != 0);
-  /*
-  let screen_size_flag = ((bg_control_flags >> 14) & 0x3) as usize;
-  let (bg_x_tile_count, bg_y_tile_count) = match screen_size_flag {
-    0 => (32, 32),
-    1 => (64, 32),
-    2 => (32, 64),
-    3 => (64, 64),
-    _ => std::unreachable!(),
-  };
-
-  let bytes_per_tile =
-    if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) };
-  */
-  let screen_sizes = bg_control_flags.map(|bgcnt| {
-    let screen_size_flag = ((bgcnt >> 14) & 0x3) as usize;
-    match screen_size_flag {
-      0 => (32, 32),
-      1 => (64, 32),
-      2 => (32, 64),
-      3 => (64, 64),
-      _ => std::unreachable!(),
-    }
-  });
-
-  let stripe_in_tile = ((scanline + scroll_y) % 8) as usize;
   let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
-
-  let bg_tile_y: u32 = ((scanline + scroll_y) / 8);
-  //let tile_map_scanline_addr = tile_map_base_addr + (bg_tile_y * bg_y_tile_count) * 2;
-  let tile_map_scanline_addrs: [_; 4] = std::array::from_fn(|idx| {
-    let bgcnt = bg_control_flags[idx];
-    let tile_map_page = u32::from((bgcnt >> 8) & 0x1F);
-    let tile_map_base_addr = tile_map_page * TILE_MAP_PAGE_SIZE;
-    let bg_y_tile_count = screen_sizes[idx].1;
-    tile_map_base_addr + (bg_tile_y * bg_y_tile_count) * 2
-  });
 
   const TILE_HSTRIP_COUNT_IN_SCANLINE: usize = VIDEO_WIDTH / 8;
   let mut output_transparency = [false; 8];
   for strip_idx in 0..TILE_HSTRIP_COUNT_IN_SCANLINE {
-    /*
-    let bg_tile_x = (bg_first_tile_x + strip_idx as u32) % bg_x_tile_count;
-    let tile_map_element_addr = tile_map_scanline_addr
-      + (bg_tile_x & 0x1F) * 2
-      + if bg_tile_x >= 32 { 32 * bg_y_tile_count * 2 } else { 0 };
-
-    // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
-    let tile_map_element = fetch_u16_vram(gba, tile_map_element_addr) as u32;
-
-    let tile_number = tile_map_element & 0x3FF;
-    let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
-    */
-
     let mut first_iter = true;
-    for bg_num in bgs_to_draw.iter().filter(|bg| **bg != 4) {
-      let bg_tile_x = (bg_first_tile_x + strip_idx as u32) % screen_sizes[*bg_num].0;
+    for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
+      let (_priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y)) =
+        bg_data;
+      let raw_bg_x = scroll_x + (strip_idx * 8) as u32;
+      let raw_bg_y = scroll_y + scanline;
+      let raw_bg_tile_x = raw_bg_x / 8;
+      let raw_bg_tile_y = raw_bg_y / 8;
+      let bg_tile_x_in_screenblock = raw_bg_tile_x % 32;
+      let bg_tile_y_in_screenblock = raw_bg_tile_y % 32;
+      // 32 = 0x20
+      let screenblock_idx = ((raw_bg_tile_x & 32) >> 5) + ((raw_bg_tile_y & 32) >> 5) * 2;
 
-      let tile_map_element_addr = tile_map_scanline_addrs[*bg_num]
-        + (bg_tile_x & 0x1F) * 2
-        + if bg_tile_x >= 32 { 32 * screen_sizes[*bg_num].1 * 2 } else { 0 };
+      let strip_in_tile = (raw_bg_y % 8) as usize;
+
+      let tile_map_element_addr = tile_map_base_addrs[screenblock_idx as usize]
+        + (bg_tile_x_in_screenblock * 2)
+        + (bg_tile_y_in_screenblock * 2 * 32);
       let tile_map_element = fetch_u16_vram(gba, tile_map_element_addr) as u32;
 
-      let full_palette = full_palette_bools[*bg_num];
-      let bytes_per_tile =
-        if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) };
+      let bytes_per_tile = bytes_per_tile(*full_palette);
       let tile_number = tile_map_element & 0x3FF;
-      let tile_addr = tile_data_base_addrs[*bg_num] + tile_number * bytes_per_tile;
+      let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
 
       //TODO: scroll_x
       let any_transparent = if first_iter {
@@ -410,8 +380,8 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
           &mut output_transparency,
           tile_map_element,
           tile_addr,
-          full_palette,
-          stripe_in_tile,
+          *full_palette,
+          strip_in_tile,
           strip_idx,
           scanline_first_px_idx,
         )
@@ -424,8 +394,8 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
           &mut output_transparency,
           tile_map_element,
           tile_addr,
-          full_palette,
-          stripe_in_tile,
+          *full_palette,
+          strip_in_tile,
           strip_idx,
           scanline_first_px_idx,
         );
@@ -469,8 +439,8 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       let start_idx_out = (start_px * 3) as usize;
       #[allow(clippy::match_ref_pats)]
       for (idx, slice) in gba.vram[start_idx..].chunks_exact(2).take(VIDEO_WIDTH).enumerate() {
-        if let &[high_byte, low_byte] = slice {
-          let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
+        if let &[low_byte, high_byte] = slice {
+          let color = (u16::from(low_byte) << 8) + (u16::from(high_byte));
           write_color(&mut gba.output_texture[(start_idx_out + idx * 3)..], color);
         }
       }
@@ -516,7 +486,7 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
         }
         let iter = gba.vram[start_idx..].chunks_exact(2).take(BGMODE5_WIDTH);
         for slice in iter {
-          if let &[high_byte, low_byte] = slice {
+          if let &[low_byte, high_byte] = slice {
             // TODO: Is this right?
             let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
             write_color(&mut gba.output_texture[start_idx_out..], color);
@@ -531,7 +501,7 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       }
     }
     _ => {
-      gba.print_fn.map(|f| f(&alloc::format!("Unrecognized bg mode: {bg_mode}")));
+      //gba.print_fn.map(|f| f(&alloc::format!("Unrecognized bg mode: {bg_mode}")));
     }
   }
 }
