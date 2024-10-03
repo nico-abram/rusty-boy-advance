@@ -398,8 +398,14 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
     }
     2 => {
       // MOV
-      let x = gba.regs[rs];
-      gba.regs[rd] = if rd == 15 { gba.regs[rs] & 0xFFFF_FFFE } else { gba.regs[rs] };
+      let mut x = gba.regs[rs];
+      if rs == 15 {
+        x += 2;
+      }
+      if rd == 15 {
+        x &= 0xFFFF_FFFE;
+      }
+      gba.regs[rd] = x;
       gba.clocks += gba.sequential_cycle()
         + if rd == 15 { gba.sequential_cycle() + gba.nonsequential_cycle() } else { 0 };
       /*
@@ -419,6 +425,8 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
       //if !thumb {
       if rs == 15 {
         // Likely wrong (The +4)
+        // TODO: Try this instead:
+        // gba.regs[15] = (rs_val & 0xFFFF_FFFE) + 2;
         gba.regs[15] = (rs_val & 0xFFFF_FFFC) + 4;
       } else {
         gba.regs[15] = rs_val & 0xFFFF_FFFE;
