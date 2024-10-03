@@ -50,7 +50,7 @@ const HBLANK_CYCLES: u32 = (NUM_REAL_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXE
 pub const CLOCKS_PER_PIXEL: u32 = 4;
 pub const CLOCKS_PER_SCANLINE: u32 = (NUM_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXEL;
 const NUM_VIRTUAL_SCANLINES: u16 = 68;
-const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
+pub(crate) const NUM_REAL_SCANLINES: u16 = VIDEO_HEIGHT as u16;
 const NUM_SCANLINES: u16 = NUM_REAL_SCANLINES + NUM_VIRTUAL_SCANLINES;
 pub const CLOCKS_PER_FRAME: u32 = (NUM_SCANLINES as u32) * CLOCKS_PER_SCANLINE;
 
@@ -252,7 +252,7 @@ impl GBA {
     };
     const PRINT_STATE: fn(&mut GBA) = |gba: &mut GBA| {
       if let Some(f) = gba.print_fn {
-        f(format!("{}\n", gba.state_as_string_()).as_str());
+        f(format!("{}\n", gba.state_as_string()).as_str());
       }
     };
 
@@ -337,8 +337,10 @@ impl GBA {
       // BG/OBJ Palette RAM        (1 Kbyte)
       0x05 => self.palette_ram[(addr & 0x0000_03FF) as usize],
       // VRAM - Video RAM          (96 KBytes)
-      //0x0600_0000..=0x0601_7FFF => self.vram[addr - 0x0600_0000],
-      0x06 => self.vram[(addr & 0x0001_FFFF) as usize],
+      // if top bit is set: 0x0001_FFFF otherwise: 0x0001_7FFF
+      // (addr&0x0001_0000>>1) xor 0x0001_FFFF
+      //0x06 => self.vram[(addr & 0x0001_FFFF) as usize],
+      0x06 => self.vram[(addr & (((addr & 0x0001_0000) >> 1) ^ 0x0001_FFFF)) as usize],
       // OAM - OBJ Attributes      (1 Kbyte)
       0x07 => self.oam[(addr & 0x0000_03FF) as usize],
       // External Memory (Game Pak)
@@ -516,6 +518,7 @@ impl GBA {
     self.all_modes_banks = [[0_u32; 2]; 6];
     self.io_mem = [0_u8; 1022];
     self.write_u32(0x0400_0088, 0x200);
+    self.write_u32(DISPCNT_ADDR, 0x0080);
     self.spsrs = [CPSR(0x0000_001F); 5];
     self.all_modes_banks[CpuMode::IRQ.as_usize()][0] = 0x0300_7FA0;
     self.all_modes_banks[CpuMode::Supervisor.as_usize()][0] = 0x0300_7FE0;
@@ -528,6 +531,8 @@ impl GBA {
     self.oam = [0_u8; KB];
     self.game_pak = Box::new([0_u8; 32 * MB]);
     self.game_pak_sram = [0x00_u8; 64 * KB]; // mesen fills it with 0xFF
+    self.game_pak_sram[0] = 0xC2;
+    self.game_pak_sram[1] = 0x09;
     self.clocks = 0_u32;
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
     self.regs[13] = 0x0300_7F00; // Taken from mgba
@@ -560,7 +565,7 @@ impl GBA {
     self.cpsr.thumb_state_flag()
   }
 
-  pub fn state_as_string_(&mut self) -> String {
+  pub fn state_as_string(&mut self) -> String {
     format!(
       "{} CPSR:{:08X}\n{} halted:{}",
       self
@@ -575,28 +580,6 @@ impl GBA {
         .collect::<Vec<_>>()
         .join(" "),
       self.cpsr.0,
-      self.cpsr,
-      self.halted
-    )
-  }
-  pub fn state_as_string(&mut self) -> String {
-    format!(
-      "{}\n{} halted:{}",
-      self
-        .regs
-        .iter()
-        .enumerate()
-        .map(|(idx, val)| format!(
-          "r{}:{:08X}",
-          idx,
-          if idx == 15 {
-            val /*+ if self.cpsr.thumb_state_flag() { 2 } else { 4 } */
-          } else {
-            val
-          }
-        ))
-        .collect::<Vec<_>>()
-        .join(" "),
       self.cpsr,
       self.halted
     )
@@ -725,23 +708,6 @@ impl GBA {
     self.write_u16(KEY_STATUS_REG, !self.persistent_input_bitmask);
 
     Ok(())
-  }
-
-  /// Fills three bytes starting at the given index in the given slice with the RGB values of the given
-  /// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
-  /// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
-  #[allow(clippy::identity_op)]
-  #[allow(clippy::redundant_closure_call)]
-  #[inline]
-  fn fill_output_color(output_texture: &mut [u8], idx: usize, color: u16) {
-    let r = ((color >> 0) & 0x001F) as u8;
-    let g = ((color >> 5) & 0x001F) as u8;
-    let b = ((color >> 10) & 0x001F) as u8;
-
-    let col5_to_col8 = |x| (x << 3) | (x >> 2);
-    output_texture[(idx * 3) + 0] = col5_to_col8(r);
-    output_texture[(idx * 3) + 1] = col5_to_col8(g);
-    output_texture[(idx * 3) + 2] = col5_to_col8(b);
   }
 
   /// Fill the field output_texture with RGB values. See http://problemkaputt.de/gbatek.htm#gbalcdvideocontroller
