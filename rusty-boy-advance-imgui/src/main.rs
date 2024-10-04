@@ -161,6 +161,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut system = support::init("Rusty Boy Advance ImGui");
   let video_output_texture_id = imgui_glium_texture(&mut system, WIDTH, HEIGHT, gba.video_output().into());
   
+  let sprite_texture_ids: [_; 128] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 64, 64, vec![0u8; 64*64*3]));
+  let mut sprite_metadata: [_; 128] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32)});
   let bg_tile_texture_ids: [_; 32*32] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
   let mut bg_tile_metadata: [_; 32*32] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32)});
   let tile_texture_ids: [_; 512] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
@@ -933,6 +935,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           force_update |= ui.radio_button("2##tile_page", &mut tile_viewer_tile_page, 2) ;
           ui.same_line();
           force_update |= ui.radio_button("3##tile_page", &mut tile_viewer_tile_page, 3) ;
+          ui.same_line();
+          force_update |= ui.radio_button("sp1##tile_page", &mut tile_viewer_tile_page, 4) ;
+          ui.same_line();
+          force_update |= ui.radio_button("sp2##tile_page", &mut tile_viewer_tile_page, 5) ;
 
           force_update |= ui.radio_button("BPP4##tile_bpp", &mut tile_viewer_bpp8, false) ;
           ui.same_line();
@@ -978,6 +984,52 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           style.pop();
         });
+        unsafe {
+            imgui::sys::igSetNextWindowDockID(remainder_dock_id,  imgui::sys::ImGuiCond_Once as i32);
+        }
+        ui.window("Sprite viewer")
+        .build(|| {
+          if ui.button("update")  {
+            for sprite_idx in 0..128 {
+                let sprite_tex_id = sprite_texture_ids[sprite_idx];
+
+                let texture = renderer.textures().get(sprite_tex_id).unwrap();
+                let (sprite_rgb_bytes,x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx) = rusty_boy_advance::draw::draw_sprite(&mut gba, sprite_idx as u8);
+                let raw = RawImage2d {
+                  data: Cow::Owned(sprite_rgb_bytes.into()),
+                  width: size_x,
+                  height: size_y,
+                  format: ClientFormat::U8U8U8,
+                };
+                texture.texture.write(glium::Rect { left: 0, bottom: 0, width: size_x, height: size_y }, raw);
+                sprite_metadata[sprite_idx] = (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx);
+            }
+          }
+          
+          let style = ui.push_style_var(StyleVar::ItemSpacing([1.0, 1.0]));
+          for sprite_idx in 0..128 {
+            ui.spacing();
+              let sprite_tex_id = sprite_texture_ids[sprite_idx];
+              let (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx) = sprite_metadata[sprite_idx];
+              ui.same_line();
+              imgui::Image::new(sprite_tex_id, [size_x as f32, size_y as f32])
+                .build(ui);
+              if ui.is_item_hovered() {
+              ui.tooltip(||{
+                imgui::Image::new(sprite_tex_id, [(size_x *4) as f32, (size_y *4)as f32])
+                  .build(ui);
+                ui.text(&format!("Sprite index: {sprite_idx}"));
+                ui.text(&format!("X: {x_pos:08X}"));
+                ui.text(&format!("Y: {y_pos:08X}"));
+                ui.text(&format!("Size: {size_x}X{size_y}"));
+                ui.text(&format!("tile_idx: {tile_idx:08X}"));
+                ui.text(&format!("tile_addr: {tile_addr:08X}"));
+                ui.text(&format!("palette_idx: {palette_idx}"));
+              });
+            }
+          }
+          style.pop();
+      });
     //ui.show_demo_window(_opened);
     //ui.show_metrics_window(opened);
   });

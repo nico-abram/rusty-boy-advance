@@ -186,26 +186,31 @@ pub fn draw_mode0_bg_tile_hstrip(
   tile_map_element: u32,
   tile_addr: u32,
   full_palette: bool,
-  strip_idx_in_tile: usize,
+  mut strip_idx_in_tile: usize,
 ) {
   let h_flip = (tile_map_element & 0x0000_0400) != 0;
   let v_flip: bool = (tile_map_element & 0x0000_0800) != 0;
 
   if full_palette {
     // 1 byte per pixel
+    if v_flip {
+      strip_idx_in_tile = 7 - strip_idx_in_tile;
+    }
     let start_idx = strip_idx_in_tile * 8;
     let end_idx = (strip_idx_in_tile + 1) * 8;
+    let h_flip_offs = 2 * start_idx + 7;
 
     for i in start_idx..end_idx {
-      let palette_idx = gba.vram[tile_addr as usize + i] as usize;
+      let lookup_idx = if h_flip { h_flip_offs - i } else { i };
+      let palette_idx = gba.vram[tile_addr as usize + lookup_idx] as usize;
+
       let color = fetch_u16(&gba.palette_ram[..], palette_idx * 2);
-      // todo: flipping
       write_color(&mut output[((i & 0x7) * 3) as usize..], color);
     }
   } else {
     // 4 bits per pixel
     let palette_base = {
-      let palette_number = (tile_map_element >> 12) & 0xF;
+      let palette_number = (tile_map_element >> 12) & 0x1F;
       // Each sub palette has 16 colors of 2 bytes each
       (palette_number * 16 * 2) as usize
     };
@@ -394,7 +399,7 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
 
   let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
   let mut first_bg = true;
-  for bg_data in bgs_to_draw.iter().filter(|bg| **bg == 1).map(|bg| &bg_data_arr[*bg]) {
+  for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
     draw_scanline_for_bg(gba, bg_data, first_bg, scanline_first_px_idx);
     first_bg = false;
   }
@@ -484,4 +489,54 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       //gba.print_fn.map(|f| f(&alloc::format!("Unrecognized bg mode: {bg_mode}")));
     }
   }
+}
+
+pub fn draw_sprite(
+  gba: &mut GBA,
+  sprite_idx: u8,
+) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32, u32, u32, u32) {
+  let oam_idx = sprite_idx as usize * 8;
+  let attr0 = fetch_u16(&gba.oam[..], oam_idx + 0);
+  let attr1 = fetch_u16(&gba.oam[..], oam_idx + 2);
+  let attr2 = fetch_u16(&gba.oam[..], oam_idx + 4);
+
+  let y = attr0 & 0x00FF;
+  let obj_mode = attr0 & 0x0300;
+  let gfx_mode = attr0 & 0x0C00;
+  let mosaic = attr0 & 0x1000 != 0;
+  let bpp8 = attr0 & 0x2000 != 0;
+  let shape = attr0 & 0xC000;
+
+  let x = attr1 & 0x01FF;
+  let affine_idx = (attr1 & 0x3E00) >> 9;
+  let hflip = attr1 & 0x1000 != 0;
+  let vflip = attr1 & 0x2000 != 0;
+  let size = (attr1 & 0xC000) >> 14;
+
+  let tile_idx = attr2 & 0x03FF;
+  let priority = (attr2 & 0x0C00) >> 10;
+  let palette_idx = (attr2 & 0xF000) >> 12;
+
+  let base_size = 8 << size;
+  let base_size2 = 8 << size.saturating_sub(1);
+  let base_size3 = 16 << ((size + 1) >> 1);
+  let (size_x, size_y) = if shape == 0b00 {
+    (base_size, base_size)
+  } else if shape == 0xb01 {
+    (base_size2, base_size3)
+  } else {
+    // 10
+    (base_size3, base_size2)
+  };
+
+  (
+    alloc::vec![0u8; size_x  as usize * size_y as usize * 3],
+    y as u32,
+    x as u32,
+    size_x,
+    size_y,
+    tile_idx as u32,
+    tile_idx as u32 + 0x1337,
+    palette_idx as u32,
+  )
 }
