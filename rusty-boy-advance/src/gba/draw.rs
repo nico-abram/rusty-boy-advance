@@ -7,11 +7,8 @@ const REG_BG0HOFS: u32 = 0x0400_0010;
 const REG_BG0VOFS: u32 = 0x0400_0012;
 
 #[inline]
-fn bgscroll(gba: &mut GBA, bg_num: u32) -> (u32, u32) {
-  (
-    fetch_u16_iomem(gba, REG_BG0HOFS + bg_num * 4) as u32,
-    fetch_u16_iomem(gba, REG_BG0VOFS + bg_num * 4) as u32,
-  )
+fn bgscroll(gba: &mut GBA, bg_num: u32) -> (u16, u16) {
+  (fetch_u16_iomem(gba, REG_BG0HOFS + bg_num * 4), fetch_u16_iomem(gba, REG_BG0VOFS + bg_num * 4))
 }
 
 const BG0CNT: u32 = 0x0400_0008;
@@ -25,8 +22,8 @@ const TILE_DATA_PAGE_SIZE: u32 = 16 * 1024;
 pub const TILE_DATA_PAGE_TILE_COUNT_BPP8: u32 = TILE_DATA_PAGE_SIZE / (64 * 64);
 pub const TILE_DATA_PAGE_TILE_COUNT_BPP4: u32 = TILE_DATA_PAGE_TILE_COUNT_BPP8 / 2;
 #[inline]
-fn parse_bgcnt(bg_control_flags: u32) -> (u32, bool, u32, u32, bool, (u32, u32)) {
-  let priority = bg_control_flags & 0x3;
+fn parse_bgcnt(bg_control_flags: u32) -> (u8, bool, u32, u32, bool, (u8, u8)) {
+  let priority = (bg_control_flags & 0x3) as u8;
   let mosaic = bg_control_flags & 0x40 != 0;
   // The tile data contains colours, format depends on full palette
   // (1 byte per colour) or not (4 bits a colour)
@@ -54,7 +51,7 @@ fn parse_bgcnt(bg_control_flags: u32) -> (u32, bool, u32, u32, bool, (u32, u32))
     tile_data_base_addr,
     tile_map_base_addr,
     full_palette,
-    (bg_x_tile_count, bg_y_tile_count),
+    (bg_x_tile_count as u8, bg_y_tile_count as u8),
   )
 }
 
@@ -89,7 +86,7 @@ fn fetch_u16(mem: &[u8], addr: usize) -> u16 {
   (mem[addr] as u16) + ((mem[addr + 1] as u16) << 8)
 }
 
-fn fetch_u16_vram(gba: &GBA, addr: u32) -> u16 {
+fn fetch_u16_vram(gba: &GBA, addr: u16) -> u16 {
   let addr = addr as usize;
   fetch_u16(&gba.vram[..], addr)
 }
@@ -155,18 +152,18 @@ pub fn get_mode0_bg_tile(
 
   let bytes_per_tile = bytes_per_tile(full_palette);
 
-  assert!(tile_x < bg_tile_count_x);
-  assert!(tile_x < bg_tile_count_y);
+  assert!(tile_x < bg_tile_count_x as u32);
+  assert!(tile_x < bg_tile_count_y as u32);
 
   // The math here is pretty weird. The way the tiles are laid out in memory seems to be
   // the first (top-left) 32x32 tiles, then the bottom-left 32x32, then top-right
   // then bottom-right
   let tile_map_element_addr = tile_map_base_addr
-    + (((tile_x & 0x1F) + tile_y * bg_tile_count_y) * 2)
-    + if tile_x >= 32 { 32 * bg_tile_count_y * 2 } else { 0 };
+    + (((tile_x & 0x1F) + tile_y * bg_tile_count_y as u32) * 2)
+    + if tile_x >= 32 { 32 * bg_tile_count_y as u32 * 2 } else { 0 };
 
   // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
-  let tile_map_element = u32::from(fetch_u16_vram(gba, tile_map_element_addr));
+  let tile_map_element = u32::from(fetch_u16_vram(gba, tile_map_element_addr as u16));
 
   let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
   let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
@@ -278,12 +275,16 @@ pub fn draw_mode0_bg_tile_hstrip<const USE_GBA_TEXTURE: bool>(
   any_transparent_px
 }
 
-fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
+type BgData = (u8, u32, [u16; 2], bool, (u16, u16));
+fn draw_scanline_bgmode0_(gba: &mut GBA, scanline: u32, display_control: u16) {
   let bg_data_arr: [_; 4] = std::array::from_fn(|bg_num| {
     let bg_num: u32 = bg_num as u32;
     let bg_ctrl_flags = bgcnt(gba, bg_num);
 
     let (scroll_x, scroll_y) = bgscroll(gba, bg_num);
+    let bg_raw_y = scroll_y + scanline as u16;
+    let bg_raw_tile_y = bg_raw_y / 8;
+    let is_second_vertical_screenblock = bg_raw_tile_y & 32 != 0;
 
     let (
       priority,
@@ -293,11 +294,187 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
       full_palette,
       (bg_tile_count_x, bg_tile_count_y),
     ) = parse_bgcnt(bg_ctrl_flags);
+    let tile_map_base_addr = tile_map_base_addr as u16;
     // array indexed by 32x32 bg slice (also called a screenblock)
     // indices:
     // [00 11]
     // [22 33]
-    let tile_map_base_addrs = if bg_tile_count_x == 32 && bg_tile_count_y == 32 {
+    let tile_map_base_addrs = if is_second_vertical_screenblock && bg_tile_count_y == 64 {
+      if bg_tile_count_x == 64 {
+        [tile_map_base_addr + 0x800 * 2, tile_map_base_addr + 0x800 * 3]
+      } else {
+        // 32 horiz X tiles
+        [tile_map_base_addr + 0x800, tile_map_base_addr + 0x800]
+      }
+    } else {
+      if bg_tile_count_x == 64 {
+        [tile_map_base_addr, tile_map_base_addr + 0x800]
+      } else {
+        // 32 horiz X tiles
+        [tile_map_base_addr, tile_map_base_addr]
+      }
+    };
+
+    (priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y))
+  });
+
+  // 4 is a sentinel value indicating no bg
+  let mut bgs_to_draw = [4, 4, 4, 4, 4, 4];
+  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
+    if display_control & (1 << (8 + idx)) != 0 {
+      let priority = bg_data.0 as usize;
+      if bgs_to_draw[priority] == 4 {
+        bgs_to_draw[priority] = idx;
+      } else if bgs_to_draw[priority as usize + 1] == 4 {
+        bgs_to_draw[priority + 1] = idx;
+      } else if bgs_to_draw[priority as usize + 2] == 4 {
+        bgs_to_draw[priority + 2] = idx;
+      } else {
+        unimplemented!("matching BG priority is unimplemented")
+      }
+    }
+  }
+
+  let draw_scanline_for_bg = |gba: &mut GBA,
+                              bg_data: &BgData,
+                              first_bg: bool,
+                              mut scanline_first_px_idx: usize| {
+    let transparent_color = fetch_u16(&gba.palette_ram[..], 0);
+    let transparent_color = color_to_rgb(transparent_color);
+
+    let (_priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y)) =
+      bg_data;
+    let bytes_per_tile = bytes_per_tile(*full_palette);
+
+    let raw_bg_y = scroll_y + scanline as u16;
+    let scroll_x_within_tile = (scroll_x % 8) as usize;
+    let raw_bg_tile_y = raw_bg_y / 8;
+    let bg_tile_y_in_screenblock = raw_bg_tile_y % 32;
+    let strip_in_tile = (raw_bg_y % 8) as usize;
+
+    let adjust_first_stripe_by_xscroll = scroll_x_within_tile != 0;
+    let raw_bg_x = scroll_x; // + (strip_idx as u16 * 8);
+    let mut raw_bg_tile_x = raw_bg_x / 8;
+
+    let needs_extra_strip = adjust_first_stripe_by_xscroll;
+    let mut output_pxs = [0u8; 8 * 3];
+    let mut first_strip = true;
+    const EXTRA_STRIP_IDX: usize = VIDEO_WIDTH / 8;
+    for strip_idx in 0..(VIDEO_WIDTH / 8) + if needs_extra_strip { 1 } else { 0 } {
+      let bg_tile_x_in_screenblock = raw_bg_tile_x % 32;
+      // 32 = 0x20
+      let screenblock_in_x_idx = (raw_bg_tile_x & 32) >> 5;
+
+      let tile_map_element_addr = tile_map_base_addrs[screenblock_in_x_idx as usize]
+        + (bg_tile_x_in_screenblock * 2)
+        + (bg_tile_y_in_screenblock * 2 * 32);
+      let tile_map_element = fetch_u16_vram(gba, tile_map_element_addr as u16) as u32;
+
+      let tile_number = tile_map_element & 0x3FF;
+      let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
+
+      draw_mode0_bg_tile_hstrip::<false>(
+        gba,
+        &mut output_pxs,
+        &mut [false; 8],
+        tile_map_element,
+        tile_addr,
+        *full_palette,
+        strip_in_tile,
+        strip_idx,
+        scanline_first_px_idx,
+      );
+
+      let (out_slice, painted_slice) = if first_strip && adjust_first_stripe_by_xscroll {
+        let out_texture_slice =
+          &mut gba.output_texture[scanline_first_px_idx..][..(8 - scroll_x_within_tile) * 3];
+        let painted_slice = &output_pxs[scroll_x_within_tile * 3..];
+
+        scanline_first_px_idx -= scroll_x_within_tile * 3;
+
+        (out_texture_slice, painted_slice)
+      } else if strip_idx == EXTRA_STRIP_IDX {
+        let out_texture_slice = &mut gba.output_texture
+          [scanline_first_px_idx + (EXTRA_STRIP_IDX * 8 - scroll_x_within_tile) * 3..]
+          [..scroll_x_within_tile * 3];
+        let painted_slice = &output_pxs[..scroll_x_within_tile * 3];
+
+        (out_texture_slice, painted_slice)
+      } else {
+        let out_texture_slice =
+          &mut gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3..][..8 * 3];
+        (out_texture_slice, &output_pxs[..])
+      };
+      if first_bg {
+        out_slice.copy_from_slice(painted_slice);
+      } else {
+        assert!(out_slice.len() == painted_slice.len());
+        for (out, in_) in out_slice.chunks_exact_mut(3).zip(painted_slice.chunks_exact(3)) {
+          if out[0] == transparent_color.0
+            && out[1] == transparent_color.1
+            && out[2] == transparent_color.2
+          {
+            out.copy_from_slice(in_);
+          }
+        }
+      }
+
+      first_strip = false;
+      raw_bg_tile_x += 1;
+    }
+    if needs_extra_strip {}
+  };
+
+  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
+  let mut first_bg = true;
+  for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
+    draw_scanline_for_bg(gba, bg_data, first_bg, scanline_first_px_idx);
+    first_bg = false;
+  }
+}
+
+fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
+  let bg_data_arr: [_; 4] = std::array::from_fn(|bg_num| {
+    let bg_num: u32 = bg_num as u32;
+    let bg_ctrl_flags = bgcnt(gba, bg_num);
+
+    let (scroll_x, scroll_y) = bgscroll(gba, bg_num);
+    let bg_raw_y = scroll_y + scanline as u16;
+    let bg_raw_tile_y = bg_raw_y / 8;
+    let is_second_vertical_screenblock = bg_raw_tile_y & 32 != 0;
+
+    let (
+      priority,
+      _mosaic,
+      tile_data_base_addr,
+      tile_map_base_addr,
+      full_palette,
+      (bg_tile_count_x, bg_tile_count_y),
+    ) = parse_bgcnt(bg_ctrl_flags);
+    let tile_map_base_addr = tile_map_base_addr as u16;
+    // array indexed by 32x32 bg slice (also called a screenblock)
+    // indices:
+    // [00 11]
+    // [22 33]
+    let tile_map_base_addrs = if is_second_vertical_screenblock && bg_tile_count_y == 64 {
+      if bg_tile_count_x == 64 {
+        [tile_map_base_addr + 0x800 * 2, tile_map_base_addr + 0x800 * 3]
+      } else {
+        // 32 horiz X tiles
+        [tile_map_base_addr + 0x800, tile_map_base_addr + 0x800]
+      }
+    } else {
+      if bg_tile_count_x == 64 {
+        [tile_map_base_addr, tile_map_base_addr + 0x800]
+      } else {
+        // 32 horiz X tiles
+        [tile_map_base_addr, tile_map_base_addr]
+      }
+    };
+    /*
+    //original table impl with full 2x2 table
+    // above, it was replaced with a 2x1 table since y is constant in 1 scanline
+    if bg_tile_count_x == 32 && bg_tile_count_y == 32 {
       [tile_map_base_addr, tile_map_base_addr, tile_map_base_addr, tile_map_base_addr]
     } else if bg_tile_count_x == 64 && bg_tile_count_y == 64 {
       [
@@ -322,6 +499,7 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
         tile_map_base_addr + 0x800,
       ]
     };
+    */
 
     (priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y))
   });
@@ -345,25 +523,29 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
 
   let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
 
+  let mut first_strip = true;
+
   const TILE_HSTRIP_COUNT_IN_SCANLINE: usize = VIDEO_WIDTH / 8;
   let mut output_transparency = [false; 8];
   for strip_idx in 0..TILE_HSTRIP_COUNT_IN_SCANLINE {
-    let mut first_iter = true;
+    let mut first_bg = true;
     for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
       let (_priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y)) =
         bg_data;
-      let raw_bg_x = scroll_x + (strip_idx * 8) as u32;
-      let raw_bg_y = scroll_y + scanline;
+      let raw_bg_x = scroll_x + (strip_idx as u16 * 8);
+      let raw_bg_y = scroll_y + scanline as u16;
+      let scroll_x_within_tile = scroll_x % 8;
+      let adjust_first_stripe_by_xscroll = first_strip && scroll_x_within_tile != 0;
       let raw_bg_tile_x = raw_bg_x / 8;
       let raw_bg_tile_y = raw_bg_y / 8;
       let bg_tile_x_in_screenblock = raw_bg_tile_x % 32;
       let bg_tile_y_in_screenblock = raw_bg_tile_y % 32;
       // 32 = 0x20
-      let screenblock_idx = ((raw_bg_tile_x & 32) >> 5) + ((raw_bg_tile_y & 32) >> 5) * 2;
+      let screenblock_in_x_idx = (raw_bg_tile_x & 32) >> 5;
 
       let strip_in_tile = (raw_bg_y % 8) as usize;
 
-      let tile_map_element_addr = tile_map_base_addrs[screenblock_idx as usize]
+      let tile_map_element_addr = tile_map_base_addrs[screenblock_in_x_idx as usize]
         + (bg_tile_x_in_screenblock * 2)
         + (bg_tile_y_in_screenblock * 2 * 32);
       let tile_map_element = fetch_u16_vram(gba, tile_map_element_addr) as u32;
@@ -373,18 +555,36 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
       let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
 
       //TODO: scroll_x
-      let any_transparent = if first_iter {
-        draw_mode0_bg_tile_hstrip::<true>(
-          gba,
-          &mut [],
-          &mut output_transparency,
-          tile_map_element,
-          tile_addr,
-          *full_palette,
-          strip_in_tile,
-          strip_idx,
-          scanline_first_px_idx,
-        )
+      let any_transparent = if first_bg {
+        if adjust_first_stripe_by_xscroll {
+          let mut out = [0u8; 8 * 3];
+          let any_transparent = draw_mode0_bg_tile_hstrip::<false>(
+            gba,
+            &mut out[..],
+            &mut output_transparency,
+            tile_map_element,
+            tile_addr,
+            *full_palette,
+            strip_in_tile,
+            strip_idx,
+            scanline_first_px_idx,
+          );
+          gba.output_texture[scanline_first_px_idx..][..(8 - scroll_x_within_tile as usize) * 3]
+            .copy_from_slice(&out[scroll_x_within_tile as usize * 3..]);
+          any_transparent
+        } else {
+          draw_mode0_bg_tile_hstrip::<true>(
+            gba,
+            &mut [],
+            &mut output_transparency,
+            tile_map_element,
+            tile_addr,
+            *full_palette,
+            strip_in_tile,
+            strip_idx,
+            scanline_first_px_idx,
+          )
+        }
       } else {
         let mut out = [0u8; 8 * 3];
         let output_transparency2 = output_transparency;
@@ -399,24 +599,42 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
           strip_idx,
           scanline_first_px_idx,
         );
-        for (idx, _) in output_transparency2.iter().enumerate().filter(|(_, b)| **b) {
-          gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 0] =
-            out[idx * 3 + 0];
-          gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 1] =
-            out[idx * 3 + 1];
-          gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 2] =
-            out[idx * 3 + 2];
-        }
-        for i in 0..8 {
-          output_transparency[i] = output_transparency2[i] && output_transparency[i];
+        if adjust_first_stripe_by_xscroll {
+          for (idx, _) in output_transparency2.iter().enumerate().filter(|(_, b)| **b) {
+            if idx >= scroll_x_within_tile as usize {
+              let idx = idx - scroll_x_within_tile as usize;
+              gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 0] =
+                out[idx * 3 + 0];
+              gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 1] =
+                out[idx * 3 + 1];
+              gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 2] =
+                out[idx * 3 + 2];
+            }
+          }
+          for i in 0..8 {
+            output_transparency[i] = output_transparency2[i] && output_transparency[i];
+          }
+        } else {
+          for (idx, _) in output_transparency2.iter().enumerate().filter(|(_, b)| **b) {
+            gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 0] =
+              out[idx * 3 + 0];
+            gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 1] =
+              out[idx * 3 + 1];
+            gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3 + idx * 3 + 2] =
+              out[idx * 3 + 2];
+          }
+          for i in 0..8 {
+            output_transparency[i] = output_transparency2[i] && output_transparency[i];
+          }
         }
         any_transparent
       };
       if !any_transparent {
         break;
       }
-      first_iter = false;
+      first_bg = false;
     }
+    first_strip = false;
   }
 }
 
@@ -426,7 +644,7 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
   let start_px = scanline * VIDEO_WIDTH as u32;
 
   match bg_mode {
-    0 => draw_scanline_bgmode0(gba, scanline, display_control),
+    0 => draw_scanline_bgmode0_(gba, scanline, display_control),
     1 => {
       gba.print_fn.map(|f| f("Unimplemented: bg mode 1"));
     }
