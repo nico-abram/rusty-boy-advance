@@ -499,19 +499,20 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
 
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
-  let is_halfword = as_11th_bit(opcode);
+  let is_halfword_else_byte = as_11th_bit(opcode);
   let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
   let sign_extend = (opcode & 0x0400) != 0;
   let addr = gba.regs[rb].overflowing_add(gba.regs[ro]).0;
 
-  if !is_halfword && !sign_extend {
-    // Store 32bit data
+  // opcode 00 means strh, the rest are loads
+  if !is_halfword_else_byte && !sign_extend {
+    // Store 16bit data
     gba.write_u16(addr, gba.regs[rd] as u16);
     gba.clocks += gba.nonsequential_cycle() + gba.nonsequential_cycle();
     return Ok(());
   }
 
-  gba.regs[rd] = if is_halfword {
+  gba.regs[rd] = if is_halfword_else_byte {
     // Half-word(16 bits)
     if sign_extend {
       i32::from(gba.fetch_u16(addr) as i16) as u32 // Sign extend
