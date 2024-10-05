@@ -608,7 +608,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         ui.same_line();
         let _pushed_width = ui.push_item_width(200.0);
-        ui.input_scalar("###91283", &mut go_to_addr_target).display_format("%08X").flags(InputTextFlags::CHARS_HEXADECIMAL).step(1).build();
+        ui.input_scalar("###gotoaddr_in", &mut go_to_addr_target).display_format("%08X").flags(InputTextFlags::CHARS_HEXADECIMAL).step(0).build();
       });
       unsafe {
         imgui::sys::igSetNextWindowDockID(top_left2_top_dock_id,  imgui::sys::ImGuiCond_Once as i32);
@@ -805,6 +805,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               ui.next_column();
             }
           });
+          scroll_to_addr = false;
       });
       unsafe {
         imgui::sys::igSetNextWindowDockID(bottom_dock_id,  imgui::sys::ImGuiCond_Once as i32);
