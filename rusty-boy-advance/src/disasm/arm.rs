@@ -268,7 +268,11 @@ fn branch_and_exchange(opcode: u32) -> String {
 fn move_to_register_from_status_register(opcode: u32) -> String {
   let _spred = opcode_to_cond(opcode);
 
-  "MRS?".into()
+  let (_, _, use_spsr, _, _) = as_flags(opcode);
+  let reg = ((opcode & 0x0000_F000) >> 12) as usize;
+  let status_reg = if use_spsr { "SPSR" } else { "CPSR" };
+
+  format!("MRS R{reg}, {status_reg}")
 }
 
 /// Move to Status Register (MSR)

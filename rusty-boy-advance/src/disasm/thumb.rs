@@ -1,5 +1,7 @@
 use std::{format, string::String};
 
+use alloc::string::ToString;
+
 /// Utility impl on u8's for some kind of "bit pattern matching".
 ///
 /// Consider performance implications (If any) later.
@@ -126,7 +128,11 @@ fn add_or_sub(opcode: u16) -> String {
 
   let verb = if is_substraction { "SUB" } else { "ADD" };
 
-  if immediate { format!("{verb} R{rs}, #${rn:02X}") } else { format!("{verb} R{rs}, R{rn}") }
+  if immediate {
+    format!("{verb} R{rd},R{rs},#${rn:02X}")
+  } else {
+    format!("{verb} R{rd},R{rs},R{rn}")
+  }
 }
 
 /// MOV ... ASR/LSL/LSR/ASR/RRX
@@ -152,20 +158,64 @@ fn move_shifted_register(opcode: u16) -> String {
 
 /// Move, compare, add and substract immediate
 fn immediate_operation(opcode: u16) -> String {
-  "IMM_OP?".into()
+  let rd = as_bits_8_to_10(opcode);
+  let offset = u32::from(as_low_byte(opcode));
+  let operation = as_bits_11_and_12(opcode);
+
+  match operation {
+    0 => {
+      format!("MOV R{rd},#${offset:02X}")
+    }
+    1 => {
+      format!("CMP R{rd},#${offset:02X}")
+    }
+    2 => {
+      format!("ADD R{rd},R{rd},$#{offset:02X}")
+    }
+    3 => {
+      format!("SUB R{rd},R{rd},$#{offset:02X}")
+    }
+    _ => std::unreachable!(), // It's 2 bits
+  }
 }
 
-fn alu_operation(opcode: u16) -> String {
+fn alu_operation(_opcode: u16) -> String {
+  // TODO
   "ALU?".into()
 }
 /// HiReg/BX
 fn high_register_operations_or_bx(opcode: u16) -> String {
-  "BX?".into()
+  let (_, _, rs, rd) = as_lower_3bit_values(opcode);
+  let rs_most_significant_bit = (opcode & 0x0040) >> 6;
+  let rd_most_significant_bit = (opcode & 0x0080) >> 7;
+  let operation = (opcode & 0x0300) >> 8;
+  let rs = rs + ((rs_most_significant_bit as usize) << 3);
+  let rd = rd + ((rd_most_significant_bit as usize) << 3);
+
+  match operation {
+    0 => {
+      format!("ADD R{rd},R{rs}")
+    }
+    1 => {
+      format!("CMP R{rd},R{rs}")
+    }
+    2 => {
+      format!("MOV R{rd},R{rs}")
+    }
+    3 => {
+      format!("BX R{rs}")
+    }
+    _ => std::unreachable!(), // It's 2 bits
+  }
 }
 
 /// LDR PC
 fn pc_relative_load(opcode: u16) -> String {
-  "LDR PC?".into()
+  let rd = as_bits_8_to_10(opcode);
+  let byte = u32::from(as_low_byte(opcode));
+  let offset = byte << 2; // In steps of 4
+
+  format!("LDR R{rd}, [PC+${offset:06X}]")
 }
 
 /// LDR/STR
@@ -183,7 +233,17 @@ fn load_or_store_with_relative_offset(opcode: u16) -> String {
 
 /// LDR/STR H/SB/SH
 fn load_or_store_sign_extended_byte_or_halfword(opcode: u16) -> String {
-  "LDR/STR H/SB/SH?".into()
+  let is_halfword_else_byte = as_11th_bit(opcode);
+  let (_, ro, rb, rd) = as_lower_3bit_values(opcode);
+  let sign_extend = (opcode & 0x0400) != 0;
+
+  if !is_halfword_else_byte && !sign_extend {
+    format!("STRH R{rd}, [R{rb}+R{ro}]")
+  } else {
+    let verb =
+      if is_halfword_else_byte { if sign_extend { "LDSH" } else { "LDRH" } } else { "LDSB" };
+    format!("{verb} R{rd}, [R{rb}+R{ro}]")
+  }
 }
 
 /// LDR/STR {B}
@@ -199,7 +259,7 @@ fn load_or_store_with_immediate_offset(opcode: u16) -> String {
   let verb = if is_load_else_store { "LDR" } else { "STR" };
   let byte_s = if is_byte_else_word { "B" } else { "" };
 
-  format!("{verb}{byte_s} R{rd}, [R{rb}+#${offset:04X}]")
+  format!("{verb}{byte_s} R{rd}, [R{rb}+#${offset:02X}]")
 }
 
 /// LDR/STR H
@@ -211,7 +271,7 @@ fn load_or_store_halfword(opcode: u16) -> String {
 
   let verb = if is_load_else_store { "LDRH" } else { "STRH" };
 
-  format!("{verb} R{rd}, [R{rb}+#${offset:04X}]")
+  format!("{verb} R{rd}, [R{rb}+#${offset:02X}]")
 }
 
 /// LDR/STR SP
@@ -224,12 +284,26 @@ fn stack_pointer_relative_load_or_store(opcode: u16) -> String {
 
   let verb = if is_load_else_store { "LDR" } else { "STR" };
 
-  format!("{verb} R{rd}, [SP, #${offset:04X}]")
+  if offset & 0xFF00 != 0 {
+    format!("{verb} R{rd}, [SP, #${offset:04X}]")
+  } else {
+    format!("{verb} R{rd}, [SP, #${offset:02X}]")
+  }
 }
 
 /// LOAD PC/SP
 fn load_address(opcode: u16) -> String {
-  "LOAD PC/SP?".into()
+  let load_sp_else_pc = as_11th_bit(opcode);
+  let byte = as_low_byte(opcode);
+  let nn = u32::from(byte) << 2;
+  let rd = as_bits_8_to_10(opcode);
+
+  let name = if load_sp_else_pc { "SP" } else { "PC" };
+  if nn & 0xFF00 != 0 {
+    format!("LDR R{rd}, [{name}, #${nn:04X}]")
+  } else {
+    format!("LDR R{rd}, [{name}, #${nn:02X}]")
+  }
 }
 
 /// ADD/SUB SP,nn
@@ -241,23 +315,74 @@ fn add_or_sub_offset_to_stack_pointer(opcode: u16) -> String {
 
   let verb = if substract_else_add { "SUB" } else { "ADD" };
 
-  format!("{verb} SP,#${offset:08X}")
+  if offset & 0xFF00 != 0 {
+    format!("{verb} SP,#${offset:04X}")
+  } else {
+    format!("{verb} SP,#${offset:02X}")
+  }
 }
 
+fn rlist_to_string(rlist_s: &mut String, mut rlist: u8) {
+  use std::fmt::Write;
+
+  while rlist != 0 {
+    let lz = rlist.trailing_zeros();
+    let n_down = lz;
+    let l1 = (rlist >> lz).trailing_ones();
+    let n_up = n_down + l1 - 1;
+    if n_up != n_down {
+      write!(rlist_s, "R{n_down}-R{n_up},").unwrap();
+    } else {
+      write!(rlist_s, "R{n_down},").unwrap();
+    }
+    // clear bits processed
+    let bits_done = lz + l1;
+    rlist = rlist.checked_shr(bits_done).unwrap_or(0).checked_shl(bits_done).unwrap_or(0);
+    //rlist = (rlist >> bits_done) << bits_done;
+  }
+  rlist_s.pop();
+}
 /// PUSH/POP
 fn push_or_pop(opcode: u16) -> String {
-  "PUSH/POP?".into()
+  let is_pop_else_push = as_11th_bit(opcode);
+  let pc_or_lr_flag = (opcode & 0x0100) != 0; // PUSH LR or POP PC
+  let rlist = as_low_byte(opcode);
+
+  let verb = if is_pop_else_push { "POP {" } else { "PUSH {" };
+
+  let mut ret = verb.to_string();
+  rlist_to_string(&mut ret, rlist);
+
+  if pc_or_lr_flag {
+    if is_pop_else_push {
+      ret.push_str(",PC");
+    } else {
+      ret.push_str(",LR");
+    }
+  }
+  ret.push_str("}");
+
+  ret
 }
 
 /// STM/LDM
 fn multiple_loads_or_stores(opcode: u16) -> String {
-  "STM/LDM?".into()
+  let rb = as_bits_8_to_10(opcode);
+  let is_load_else_store = as_11th_bit(opcode);
+  let rlist = as_low_byte(opcode);
+
+  let verb = if is_load_else_store { "LDMIA" } else { "STMIA" };
+
+  let mut rlist_s = String::new();
+  rlist_to_string(&mut rlist_s, rlist as u8);
+
+  format!("{verb} R{rb}!, {{{rlist_s}}}")
 }
 
 /// SWI
 fn software_interrupt(opcode: u16) -> String {
   let comment = opcode & 0xFF;
-  format!("SWI #${comment:08X}")
+  format!("SWI #${comment:02X}")
 }
 
 fn opcode_to_cond(opcode: u16) -> &'static str {
@@ -294,7 +419,7 @@ fn conditional_branch(opcode: u16) -> String {
   } else {
     offset += 2;
   }
-  format!("B{cond_s} {sign_s}#${offset:04X}")
+  format!("B{cond_s} {sign_s}#${offset:02X}")
 }
 
 /// B
@@ -303,7 +428,7 @@ fn branch(opcode: u16) -> String {
   let absolute_offset = u32::from(opcode & 0x0000_03FF) << 1; // first 10 bits
   let sign = if is_negative { "-" } else { "+" };
 
-  format!("B {sign}{absolute_offset:04X}")
+  format!("B {sign}#${absolute_offset:04X}")
 }
 
 /// BL/BLX
