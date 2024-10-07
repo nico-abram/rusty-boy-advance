@@ -63,7 +63,8 @@ pub fn init(title: &str) -> System {
   // value (as the scaling is handled by winit)
   imgui.fonts().add_font(&[
     FontSource::TtfData {
-      data: include_bytes!("../resources/Roboto-Regular.ttf"),
+      //data: include_bytes!("../resources/Roboto-Regular.ttf"),
+      data: include_bytes!("../resources/FiraCode-Regular.ttf"),
       size_pixels: FONT_SIZE,
       config: Some(FontConfig {
         // As imgui-glium-renderer isn't gamma-correct with

@@ -437,7 +437,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           gba.clocks(),
           gba.clocks() / CLOCKS_PER_SCANLINE,
           gba.clocks() / CLOCKS_PER_PIXEL,
-          gba.halted()
+          if gba.halted() {"YES"} else {"NO"}
         ));
         ui.set_column_offset(1, 145.0);
         ui.next_column();
@@ -735,7 +735,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.checkbox("Auto Update", &mut browsed_memory.auto_update);
         ui.separator();
         ui.child_window("child frame")
-          .size([600.0, 400.0])
+          //.size([600.0, 400.0])
           .always_auto_resize(true)
           .border(true)
           .always_vertical_scrollbar(true)
@@ -748,7 +748,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             ui.columns(4, "memory contents", true);
             ui.set_column_offset(1, 0.0);
             ui.set_column_offset(2, 170.0);
-            ui.set_column_offset(3, 290.0);
+            ui.set_column_offset(3, 295.0);
             ui.next_column();
             ui.text("Address");
             ui.next_column();
@@ -811,7 +811,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               }
               id.pop();
               ui.next_column();
-              let id = ui.push_id_int((*addr_u32 +1)as i32);
+              let id = ui.push_id_int((*addr_u32)as i32);
               ui.text(<String as AsRef<str>>::as_ref(value));
               if let Some(popup_tok) = ui.begin_popup_context_with_label("##pop_val") {
                 if ui.button("Copy") {
@@ -822,7 +822,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               }
               id.pop();
               ui.next_column();
-              ui.text(disassembly);
+              let id = ui.push_id_int((*addr_u32)as i32);
+              ui.text(&disassembly);
+              if let Some(popup_tok) = ui.begin_popup_context_with_label("##pop_asm") {
+                if ui.button("Copy") {
+                  ui.close_current_popup();
+                  ui.set_clipboard_text(&disassembly);
+                }
+                popup_tok.end();
+              }
+              id.pop();
               ui.next_column();
             }
           });
@@ -931,8 +940,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 imgui::Image::new(tile_tex_id, [64.0 as f32, 64.0 as f32])
                   .build(ui);
                 let (map_addr, char_addr, map_val, char_idx) = bg_tile_metadata[tile_x + tile_y*32];
-                let hflip = (map_val & 0x0000_0400) != 0;
-                let vflip = (map_val & 0x0000_0800) != 0;
+                let hflip = (map_val & rusty_boy_advance::draw::H_FLIP_MAP_BIT) != 0;
+                let vflip = (map_val & rusty_boy_advance::draw::V_FLIP_MAP_BIT) != 0;
                 ui.text(&format!("tile map address: {map_addr:08X}"));
                 ui.text(&format!("tile data address: {char_addr:08X}"));
                 ui.text(&format!("tile map value: {map_val:08X}"));

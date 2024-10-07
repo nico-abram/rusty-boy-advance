@@ -6,6 +6,9 @@ const TILE_HEIGHT: u32 = 8;
 const REG_BG0HOFS: u32 = 0x0400_0010;
 const REG_BG0VOFS: u32 = 0x0400_0012;
 
+pub const H_FLIP_MAP_BIT: u32 = 0x0000_0400;
+pub const V_FLIP_MAP_BIT: u32 = 0x0000_0800;
+
 #[inline]
 fn bgscroll(gba: &mut GBA, bg_num: u32) -> (u16, u16) {
   (fetch_u16_iomem(gba, REG_BG0HOFS + bg_num * 4), fetch_u16_iomem(gba, REG_BG0VOFS + bg_num * 4))
@@ -160,7 +163,7 @@ pub fn get_mode0_bg_tile(
   // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
   let tile_map_element = u32::from(fetch_u16_vram(gba, tile_map_element_addr as u16));
 
-  let tile_number = tile_map_element & (if full_palette { 0x3FF } else { 0x3FF });
+  let tile_number = tile_map_element & 0x3FF;
   let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
 
   let mut output = alloc::vec![0u8; 8 * 8*3];
@@ -188,8 +191,8 @@ pub fn draw_mode0_bg_tile_hstrip(
   full_palette: bool,
   mut strip_idx_in_tile: usize,
 ) {
-  let h_flip = (tile_map_element & 0x0000_0400) != 0;
-  let v_flip: bool = (tile_map_element & 0x0000_0800) != 0;
+  let h_flip = (tile_map_element & H_FLIP_MAP_BIT) != 0;
+  let v_flip: bool = (tile_map_element & V_FLIP_MAP_BIT) != 0;
   if v_flip {
     strip_idx_in_tile = 7 - strip_idx_in_tile;
   }
