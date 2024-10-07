@@ -434,16 +434,11 @@ fn high_register_operations_or_bx(gba: &mut GBA, opcode: u16) -> ThumbResult {
 
       if let Some(f) = gba.branch_print_fn {
         f(format!(
-          "POP instcount:{} r15(thumb) pc:{:08X} target:{:08X} to_thumb:{} R{}:{:08}",
+          "BX instcount:{} r15(thumb) pc:{:08X} target:{:08X} to_thumb:{} R{}:{:08}",
           gba.executed_instructions_count, old_pc, gba.regs[15], thumb, rs, rs_val
         )
         .as_str());
       }
-      /*
-      if let Some(f) = gba.debug_print_fn {
-        f(format!("BLX rs_val:{:08X} pc:{:08X}", rs_val, gba.regs[15]).as_str());
-      }
-      */
       gba.clocks += gba.sequential_cycle() + gba.sequential_cycle() + gba.nonsequential_cycle();
     }
     _ => std::unreachable!(), // It's 2 bits
@@ -458,6 +453,9 @@ fn pc_relative_load(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let byte = u32::from(as_low_byte(opcode));
   let offset = byte << 2; // In steps of 4
 
+  // GBATEK says:
+  //  The value of PC will be interpreted as (($+4) AND NOT 2).
+  // I assume this means no rotate_right on unalignment. Not that PC should ever be unaligned
   gba.regs[rd] =
     gba.fetch_u32((gba.regs[15].overflowing_add(2).0).overflowing_add(offset).0 & 0xFFFF_FFFC);
 
@@ -476,11 +474,14 @@ fn load_or_store_with_relative_offset(gba: &mut GBA, opcode: u16) -> ThumbResult
   if is_load_else_store {
     gba.regs[rd] = if is_byte_else_word {
       u32::from(gba.fetch_byte(addr))
-    } else if (addr & 0x0000_0002) != 0 {
-      let addr = addr & 0xFFFF_FFFD;
-      (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
     } else {
-      gba.fetch_u32(addr & 0xFFFF_FFFD)
+      // 32bit read
+      // GBATEK:
+      // Mis-aligned LDR,SWP (rotated read)
+      // Reads from forcibly aligned address "addr AND (NOT 3)", and does then rotate the data as
+      // "ROR (addr AND 3)*8". That effect is internally used by LDRB and LDRH opcodes
+      // (which do then mask-out the unused bits).
+      gba.fetch_u32(addr & (!0x3_u32)).rotate_right((addr & 0x3) * 8)
     };
   } else if is_byte_else_word {
     gba.write_u8(addr, gba.regs[rd] as u8);
@@ -515,10 +516,16 @@ fn load_or_store_sign_extended_byte_or_halfword(gba: &mut GBA, opcode: u16) -> T
   gba.regs[rd] = if is_halfword_else_byte {
     // Half-word(16 bits)
     if sign_extend {
-      i32::from(gba.fetch_u16(addr) as i16) as u32 // Sign extend
+      if addr & 0x1 == 0 {
+        i32::from(gba.fetch_u16(addr) as i16) as u32 // Sign extend
+      } else {
+        // GBATEK:
+        //   LDRSH Rd,[odd]  -->  LDRSB Rd,[odd]         ;sign-expand BYTE value
+        i32::from(gba.fetch_byte(addr) as i8) as u32
+      }
     } else {
       // zero extend
-      u32::from(gba.fetch_u16(addr))
+      u32::from(gba.fetch_u16(addr & (!0x1)).rotate_right((addr & 0x1) * 8))
     }
   } else {
     i32::from(gba.fetch_byte(addr) as i8) as u32 // Sign extend
@@ -548,14 +555,15 @@ fn load_or_store_with_immediate_offset(gba: &mut GBA, opcode: u16) -> ThumbResul
     let offset = offset << 2;
     let addr = offset.overflowing_add(rb_val).0;
     if is_load_else_store {
-      gba.regs[rd] = if (addr & 0x0000_0002) != 0 {
-        let addr = addr & 0xFFFF_FFFD;
-        (u32::from(gba.fetch_u16(addr)) << 16) + u32::from(gba.fetch_u16(addr + 2))
-      } else {
-        gba.fetch_u32(addr & 0xFFFF_FFFD)
-      };
+      // 32bit read
+      // GBATEK:
+      // Mis-aligned LDR,SWP (rotated read)
+      // Reads from forcibly aligned address "addr AND (NOT 3)", and does then rotate the data as
+      // "ROR (addr AND 3)*8". That effect is internally used by LDRB and LDRH opcodes
+      // (which do then mask-out the unused bits).
+      gba.regs[rd] = gba.fetch_u32(addr & (!0x3_u32)).rotate_right((addr & 0x3) * 8);
     } else {
-      gba.write_u32(addr, gba.regs[rd]);
+      gba.write_u32(addr & (!0x3), gba.regs[rd]);
     }
   }
 
@@ -577,9 +585,15 @@ fn load_or_store_halfword(gba: &mut GBA, opcode: u16) -> ThumbResult {
   let addr = offset.overflowing_add(gba.regs[rb]).0;
 
   if is_load_else_store {
-    gba.regs[rd] = u32::from(gba.fetch_u16(addr));
+    // 16bit read
+    // GBATEK:
+    // Mis-aligned LDR,SWP (rotated read)
+    // Reads from forcibly aligned address "addr AND (NOT 3)", and does then rotate the data as
+    // "ROR (addr AND 3)*8". That effect is internally used by LDRB and LDRH opcodes
+    // (which do then mask-out the unused bits).
+    gba.regs[rd] = u32::from(gba.fetch_u16(addr & (!0x1)).rotate_right((addr & 0x1) * 8));
   } else {
-    gba.write_u16(addr, gba.regs[rd] as u16);
+    gba.write_u16(addr & (!0x1), gba.regs[rd] as u16);
   }
   gba.clocks += if is_load_else_store {
     gba.sequential_cycle() + gba.nonsequential_cycle() + gba.internal_cycle()
@@ -599,9 +613,9 @@ fn stack_pointer_relative_load_or_store(gba: &mut GBA, opcode: u16) -> ThumbResu
   let addr = gba.regs[13].overflowing_add(offset).0;
 
   if is_load_else_store {
-    gba.regs[rd] = gba.fetch_u32(addr);
+    gba.regs[rd] = gba.fetch_u32(addr & (!0x3)).rotate_right((addr & 0x3) * 8);
   } else {
-    gba.write_u32(addr, gba.regs[rd]);
+    gba.write_u32(addr & (!0x3), gba.regs[rd]);
   }
 
   gba.clocks += if is_load_else_store {
@@ -717,11 +731,11 @@ fn multiple_loads_or_stores(gba: &mut GBA, opcode: u16) -> ThumbResult {
 
   let operation: fn(&mut GBA, u32, usize) = if is_load_else_store {
     |gba: &mut GBA, addr, reg| {
-      gba.regs[reg] = gba.fetch_u32(addr);
+      gba.regs[reg] = gba.fetch_u32(addr & (!0x3));
     }
   } else {
     |gba: &mut GBA, addr, reg| {
-      gba.write_u32(addr, gba.regs[reg]);
+      gba.write_u32(addr & (!0x3), gba.regs[reg]);
     }
   };
 
