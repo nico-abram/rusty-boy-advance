@@ -137,6 +137,63 @@ fn push_log(s: &str) {
   logs.truncate(LOGS_SIZE);
 }
 
+
+fn post_exec(
+  gba: &GBABox,
+  result: Result<bool, GBAError>,
+  scroll_to_pc_on_break: bool,
+  scroll_to_addr: &mut bool,
+  scroll_to_addr_target: &mut u32,
+  running: &mut bool,
+  browsed_memory: &mut BrowsedMemory,
+) {
+  if result.is_err() {
+    let err_string = format!(
+      "Fatal Error: {:?} ( (pc:{:08X} instcount:{})",
+      result,
+      gba.registers()[15],
+      gba.get_executed_instruction_count()
+    );
+    push_log(&err_string);
+    *running = false;
+    for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().take(50000).rev() {
+      println!("{}", log_line);
+    }
+  }
+  if scroll_to_pc_on_break && !*running {
+    *scroll_to_addr = true;
+    *scroll_to_addr_target = gba.pc();
+  }
+}
+
+#[inline]
+fn run_n_times(
+  gba: &mut GBABox,
+  n: usize,
+  scroll_to_pc_on_break: bool,
+  scroll_to_addr: &mut bool,
+  scroll_to_addr_target: &mut u32,
+  running: &mut bool,
+  browsed_memory: &mut BrowsedMemory,
+) {
+  let mut result = Ok(false);
+  for _ in 0..n {
+    result = gba.run_one_instruction();
+    if result.is_err() {
+      break;
+    }
+  }
+  post_exec(
+    gba,
+    result,
+    scroll_to_pc_on_break,
+    scroll_to_addr,
+    scroll_to_addr_target,
+    running,
+    browsed_memory,
+  );
+}
+
 fn imgui_glium_texture(system:&mut support::System, width:u32, height:u32, data:Vec<u8>) -> TextureId{
   let gl_texture = {
     let raw = RawImage2d {
@@ -191,34 +248,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   };
   let mut scroll_to_pc_on_break = true;
 
-  fn post_exec(
-    gba: &GBABox,
-    result: Result<bool, GBAError>,
-    scroll_to_pc_on_break: bool,
-    scroll_to_addr: &mut bool,
-    scroll_to_addr_target: &mut u32,
-    running: &mut bool,
-    browsed_memory: &mut BrowsedMemory,
-  ) {
-    if result.is_err() {
-      let err_string = format!(
-        "Fatal Error: {:?} ( (pc:{:08X} instcount:{})",
-        result,
-        gba.registers()[15],
-        gba.get_executed_instruction_count()
-      );
-      push_log(&err_string);
-      *running = false;
-      for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().take(50000).rev() {
-        println!("{}", log_line);
-      }
-    }
-    if scroll_to_pc_on_break && !*running {
-      *scroll_to_addr = true;
-      *scroll_to_addr_target = gba.pc();
-    }
-  }
-
   let mut bottom_dock_id = 0u32; // log
   let mut top_dock_id = 0u32;
   let mut top_right_dock_id = 0u32;//debug buttons
@@ -262,7 +291,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   }
     
     //let mut scroll_memory_to_pc = just_clicked_continue;
-    if running {
       if !ui.io().want_capture_keyboard {
         for (key, state) in key_events {
           let input_f = if *state == ElementState::Pressed {
@@ -281,10 +309,30 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             PhysicalKey::Code(KeyCode::ArrowUp) => input_f(&mut gba, GBAButton::Up),
             PhysicalKey::Code(KeyCode::ArrowDown) => input_f(&mut gba, GBAButton::Down),
             PhysicalKey::Code(KeyCode::ArrowRight) => input_f(&mut gba, GBAButton::Right),
+            PhysicalKey::Code(KeyCode::F11) if *state == ElementState::Pressed=> {
+              run_n_times(
+                &mut gba,
+                1,
+                scroll_to_pc_on_break,
+                &mut scroll_to_addr,
+                &mut scroll_to_addr_target,
+                &mut running,
+                &mut browsed_memory,
+              );
+              gba.update_video_output();
+            },
+            PhysicalKey::Code(KeyCode::F5)if *state == ElementState::Pressed => {
+              running = !running;
+              just_clicked_continue = running;
+              if (!running) {
+                scroll_to_addr = true;
+                scroll_to_addr_target = gba.pc();
+              }},
             _ => (),
           };
         }
       }
+    if running {
       if browsed_memory.breakpoints.is_empty() {
         /*
         let p = (&mut gba as *mut GBABox);
@@ -441,33 +489,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ui.same_line();
         ui.text(if running { "Stop" } else { "Continue" });
         if !running {
-          #[inline]
-          fn run_n_times(
-            gba: &mut GBABox,
-            n: usize,
-            scroll_to_pc_on_break: bool,
-            scroll_to_addr: &mut bool,
-            scroll_to_addr_target: &mut u32,
-            running: &mut bool,
-            browsed_memory: &mut BrowsedMemory,
-          ) {
-            let mut result = Ok(false);
-            for _ in 0..n {
-              result = gba.run_one_instruction();
-              if result.is_err() {
-                break;
-              }
-            }
-            post_exec(
-              gba,
-              result,
-              scroll_to_pc_on_break,
-              scroll_to_addr,
-              scroll_to_addr_target,
-              running,
-              browsed_memory,
-            );
-          }
           if ui.button_with_size(" ", icon_size) {
             run_n_times(
               &mut gba,
@@ -482,7 +503,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step");
-          if ui.button_with_size("#1", icon_size) {
+          if ui.button_with_size("##1", icon_size) {
             run_n_times(
               &mut gba,
               10,
@@ -496,7 +517,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step(10)");
-          if ui.button_with_size("#2", icon_size) {
+          if ui.button_with_size("##2", icon_size) {
             run_n_times(
               &mut gba,
               100,
@@ -510,7 +531,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step(100)");
-          if ui.button_with_size("#3", icon_size) {
+          if ui.button_with_size("##3", icon_size) {
             run_n_times(
               &mut gba,
               1000,
@@ -524,7 +545,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step(1000)");
-          if ui.button_with_size("#4", icon_size) {
+          if ui.button_with_size("##4", icon_size) {
             run_n_times(
               &mut gba,
               10000,
@@ -538,7 +559,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step(10000)");
-          if ui.button_with_size("#5", icon_size) {
+          if ui.button_with_size("##5", icon_size) {
             run_n_times(
               &mut gba,
               100_000,
@@ -552,7 +573,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           }
           ui.same_line();
           ui.text("Step(100000)");
-          if ui.button_with_size("#6", icon_size) {
+          if ui.button_with_size("##6", icon_size) {
             run_n_times(
               &mut gba,
               variable_step as usize,
@@ -910,10 +931,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 imgui::Image::new(tile_tex_id, [64.0 as f32, 64.0 as f32])
                   .build(ui);
                 let (map_addr, char_addr, map_val, char_idx) = bg_tile_metadata[tile_x + tile_y*32];
+                let hflip = (map_val & 0x0000_0400) != 0;
+                let vflip = (map_val & 0x0000_0800) != 0;
                 ui.text(&format!("tile map address: {map_addr:08X}"));
                 ui.text(&format!("tile data address: {char_addr:08X}"));
                 ui.text(&format!("tile map value: {map_val:08X}"));
                 ui.text(&format!("tile data idx: {char_idx:08X}"));
+                ui.text(&format!("hflip:{hflip}"));
+                ui.text(&format!("vflip:{vflip}"));
               });
             }
             }
