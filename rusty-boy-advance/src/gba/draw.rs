@@ -190,12 +190,12 @@ pub fn draw_mode0_bg_tile_hstrip(
 ) {
   let h_flip = (tile_map_element & 0x0000_0400) != 0;
   let v_flip: bool = (tile_map_element & 0x0000_0800) != 0;
+  if v_flip {
+    strip_idx_in_tile = 7 - strip_idx_in_tile;
+  }
 
   if full_palette {
     // 1 byte per pixel
-    if v_flip {
-      strip_idx_in_tile = 7 - strip_idx_in_tile;
-    }
     let start_idx = strip_idx_in_tile * 8;
     let end_idx = (strip_idx_in_tile + 1) * 8;
     let h_flip_offs = 2 * start_idx + 7;
