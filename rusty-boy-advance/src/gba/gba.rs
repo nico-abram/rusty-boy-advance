@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use core::intrinsics::breakpoint;
+
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use super::{cpsr, cpu_mode, instructions, rom};
@@ -169,9 +171,11 @@ pub struct GBA {
   pub(crate) oam: [u8; KB],
   pub(crate) io_mem: [u8; 1022],
   pub(crate) clocks: u32,
+  pub(crate) clocks_at_last_instruction: u32,
   instruction_hook: Option<fn(&mut GBA)>,
   pub(crate) instruction_hook_with_opcode: Option<fn(&mut GBA, u32)>,
   pub(crate) loaded_rom: Option<Rom>,
+  pub(crate) rom_size: u32,
   pub(crate) print_fn: Option<fn(&str) -> ()>,
   pub(crate) debug_print_fn: Option<fn(&str) -> ()>,
   pub(crate) branch_print_fn: Option<fn(&str) -> ()>,
@@ -205,7 +209,9 @@ impl GBA {
       game_pak: Box::new([0_u8; 32 * MB]),
       game_pak_sram: [0x00_u8; 64 * KB], // mesen fills it with 0xFF
       clocks: 0_u32,
+      clocks_at_last_instruction: 0_u32,
       loaded_rom: None,
+      rom_size: 0,
       instruction_hook: None,
       instruction_hook_with_opcode: None,
       debug_print_fn: None,
@@ -346,13 +352,13 @@ impl GBA {
       // External Memory (Game Pak)
       // TODO: Wait states
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 0
-      0x08 => self.game_pak[(addr & 0x00FF_FFFF) as usize],
+      0x08 | 0x09 => self.game_pak[(addr & 0x01FF_FFFF) as usize],
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 1
-      0x0A => self.game_pak[(addr & 0x00FF_FFFF) as usize],
+      0x0A | 0x0B => self.game_pak[(addr & 0x01FF_FFFF) as usize],
       // Game Pak ROM/FlashROM (max 32MB) - Wait State 2
-      0x0C => self.game_pak[(addr & 0x00FF_FFFF) as usize],
+      0x0C | 0x0D => self.game_pak[(addr & 0x01FF_FFFF) as usize],
       // Out of bounds ROM access (Behaviour taken from MGBA)
-      0x0B | 0x0D | 0x09 => self.game_pak[(addr & 0x01FF_FFFF) as usize],
+      //0x0B | 0x0D | 0x09 => self.game_pak[(addr & 0x01FF_FFFF) as usize],
       // Game Pak SRAM    (max 64 KBytes) - 8bit Bus width (TODO)
       0x0E => self.game_pak_sram[(addr & 0x0000_FFFF) as usize],
       _ => 0_u8, //  unimplemented!("Invalid address: {:x}", addr)
@@ -373,10 +379,10 @@ impl GBA {
     self.write_u16_inline(addr, value);
     if addr & 0xFFFF_FF00 == 0x0400_0000 && (value & 0x0000_8000) != 0 {
       match addr {
-        0x0400_00BA => self.do_dma(0x0400_00B0), // DMA 0
-        0x0400_00C6 => self.do_dma(0x0400_00BC), // DMA 1
-        0x0400_00D2 => self.do_dma(0x0400_00C8), // DMA 2
-        0x0400_00DE => self.do_dma(0x0400_00D4), // DMA 3
+        0x0400_00BA => self.do_dma(0), // DMA 0
+        0x0400_00C6 => self.do_dma(1), // DMA 1
+        0x0400_00D2 => self.do_dma(2), // DMA 2
+        0x0400_00DE => self.do_dma(3), // DMA 3
         _ => (),
       }
     }
@@ -387,10 +393,10 @@ impl GBA {
     self.write_u16_inline(addr + 2, (value >> 16) as u16);
     if addr & 0xFFFF_FF00 == 0x0400_0000 && (value & 0x0000_8000) != 0 {
       match addr {
-        0x0400_00BA => self.do_dma(0x0400_00B0), // DMA 0
-        0x0400_00C6 => self.do_dma(0x0400_00BC), // DMA 1
-        0x0400_00D2 => self.do_dma(0x0400_00C8), // DMA 2
-        0x0400_00DE => self.do_dma(0x0400_00D4), // DMA 3
+        0x0400_00BA => self.do_dma(0), // DMA 0
+        0x0400_00C6 => self.do_dma(1), // DMA 1
+        0x0400_00D2 => self.do_dma(2), // DMA 2
+        0x0400_00DE => self.do_dma(3), // DMA 3
         _ => (),
       }
     }
@@ -478,7 +484,14 @@ impl GBA {
   pub(crate) fn fetch_u16_inline(&mut self, addr: u32) -> u16 {
     match addr >> 24 {
       // ROM out of bounds access (Behaviour taken from MGBA)
-      0x0B | 0x09 | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u16,
+      0x08 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D => {
+        if addr & 0x01_FFFF >= self.rom_size {
+          ((addr >> 1) & 0x0000_FFFF) as u16
+        } else {
+          u16::from(self.fetch_byte_inline(addr))
+            + (u16::from(self.fetch_byte_inline(addr + 1)) << 8)
+        }
+      }
       _ => {
         u16::from(self.fetch_byte_inline(addr)) + (u16::from(self.fetch_byte_inline(addr + 1)) << 8)
       }
@@ -497,7 +510,14 @@ impl GBA {
   pub(crate) fn fetch_u32_inline(&mut self, addr: u32) -> u32 {
     match addr {
       // ROM out of bounds access (Behaviour taken from MGBA)
-      0x09 | 0x0B | 0x0D => ((addr >> 1) & 0x0000_FFFF) as u32,
+      0x08 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D => {
+        if addr & 0x01_FFFF >= self.rom_size {
+          ((addr >> 1) & 0x0000_FFFF) as u32
+        } else {
+          u32::from(self.fetch_u16_inline(addr))
+            + (u32::from(self.fetch_u16_inline(addr + 2)) << 16)
+        }
+      }
       _ => {
         u32::from(self.fetch_u16_inline(addr)) + (u32::from(self.fetch_u16_inline(addr + 2)) << 16)
       }
@@ -534,6 +554,7 @@ impl GBA {
     self.game_pak_sram[0] = 0xC2;
     self.game_pak_sram[1] = 0x09;
     self.clocks = 0_u32;
+    self.clocks_at_last_instruction = 0u32;
     self.write_u16(0x400_0130, 0b0000_0011_1111_1111); // KEYINPUT register. 1's denote "not pressed"
     self.regs[13] = 0x0300_7F00; // Taken from mgba
     self.regs[15] = RESET_HANDLER;
@@ -557,6 +578,7 @@ impl GBA {
       *out = *input;
     }
     self.loaded_rom = Some(Rom::new(Vec::from(rom_bytes), title, code));
+    self.rom_size = rom_bytes.len() as u32;
 
     Ok(())
   }
@@ -586,8 +608,6 @@ impl GBA {
   }
 
   pub(crate) fn run_one_instruction(&mut self) -> Result<(), GBAError> {
-    let clocks_pre_exec = self.clocks;
-
     if self.halted {
       if self.io_mem[INTERRUPT_ENABLE_REG_IOMEMIDX]
         & self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX]
@@ -596,7 +616,8 @@ impl GBA {
         self.halted = false;
       } else {
         self.clocks += 3;
-        self.update_hvblank(clocks_pre_exec);
+        self.update_hvblank();
+        self.clocks_at_last_instruction = self.clocks;
         return Ok(());
       }
     }
@@ -611,7 +632,8 @@ impl GBA {
     }
     self.executed_instructions_count += 1;
 
-    self.update_hvblank(clocks_pre_exec);
+    self.update_hvblank();
+    self.clocks_at_last_instruction = self.clocks;
 
     Ok(())
   }
@@ -653,11 +675,12 @@ impl GBA {
     self.halted
   }
 
-  fn update_hvblank(&mut self, clocks_pre_exec: u32) {
+  fn update_hvblank(&mut self) {
+    let clocks_pre_exec = self.clocks_at_last_instruction;
     //let column_offset = ((self.clocks / CLOCKS_PER_PIXEL) as u16) % NUM_HORIZONTAL_PIXELS;
 
-    let row_offset = ((self.clocks / CLOCKS_PER_SCANLINE) as u16);
-    let row_offset_pre_exec = ((clocks_pre_exec / CLOCKS_PER_SCANLINE) as u16);
+    let row_offset = (self.clocks / CLOCKS_PER_SCANLINE) as u16;
+    let row_offset_pre_exec = (clocks_pre_exec / CLOCKS_PER_SCANLINE) as u16;
 
     let clocks_within_scanline = self.clocks % CLOCKS_PER_SCANLINE;
     let clocks_within_scanline_pre_exec = clocks_pre_exec % CLOCKS_PER_SCANLINE;
@@ -731,10 +754,11 @@ impl GBA {
     let reg_if = (self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX] as u16)
       | ((self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX + 1] as u16) << 8);
     let new_if = reg_if | bit as u16;
-    self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX] = (new_if & 0xFF) as u8;
-    self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX + 1] = ((new_if >> 8) & 0xFF) as u8;
 
     if master_interrupt_enable && this_interrupt_enable && cpsr_interrupt_enable {
+      self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX] = (new_if & 0xFF) as u8;
+      self.io_mem[INTERRUPT_REQUEST_ACKNOWLEDGE_REG_IOMEMIDX + 1] = ((new_if >> 8) & 0xFF) as u8;
+
       self.spsrs[CpuMode::IRQ.as_usize() - 1] = self.cpsr;
       let old_pc = self.regs[15];
       //let was_thumb = self.cpsr.thumb_state_flag();
@@ -756,7 +780,8 @@ impl GBA {
     }
   }
 
-  pub(crate) fn do_dma(&mut self, base_addr: u32) {
+  pub(crate) fn do_dma(&mut self, dma_num: u32) {
+    let base_addr = 0x0400_00B0 + dma_num * 12;
     let dma_num = (base_addr - 0x0400_00B0) / 0xA;
 
     let source_addr_addr = base_addr;
@@ -778,6 +803,10 @@ impl GBA {
       if count == 0 { max_count } else { count & max_count }
     };
 
+    // Indicates if, on repeat, the destination address should be reloaded
+    // into the internal register (the source is untouched)
+    let mut reload = false;
+
     let modifier_source: fn(&mut u32, u32) = match (control_flags >> 7) & 3 {
       0 => |source, size| *source += size,
       1 => |source, size| *source -= size,
@@ -789,6 +818,11 @@ impl GBA {
       0 => |source, size| *source += size,
       1 => |source, size| *source -= size,
       2 => |_, _| (),
+      3 => {
+        reload = true;
+        |source, size| *source += size
+      }
+      _ => std::panic!("Impossible"),
       _ => std::panic!("Unimplemented: Incremet/Reload Dest DMA"),
     };
     let timing = (control_flags >> 12) & 0x3;
@@ -832,7 +866,9 @@ impl GBA {
     }
 
     let irq = (control_flags & 0x4000) != 0;
-    // TODO: DMA IRQ
+    if irq {
+      self.trigger_interrupt_if_enabled(DMA0_IE_BIT + dma_num);
+    }
   }
 
   pub fn run_forever(&mut self) -> Result<(), GBAError> {
