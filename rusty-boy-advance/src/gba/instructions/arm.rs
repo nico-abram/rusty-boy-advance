@@ -242,7 +242,10 @@ fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
   let (rn, rd, _, _, rm) = as_usize_nibbles(opcode);
   // TODO: Does fetching address early work if rn = rm or rn = rd?
   let addr = gba.regs[rn];
-  let val = gba.regs[rm];
+  let mut val = gba.regs[rm];
+  if rm == 15 {
+    val += 4;
+  }
 
   if is_byte_else_word {
     // TODO: Is this right? GBATEK mentions zero extending
@@ -253,8 +256,11 @@ fn single_data_swap(gba: &mut GBA, opcode: u32) -> ARMResult {
     gba.regs[rd] = u32::from(gba.fetch_byte(addr));
     gba.write_u8(addr, val as u8);
   } else {
-    gba.regs[rd] = gba.fetch_u32(addr);
-    gba.write_u32(addr, val);
+    // For unaligned addrs, GBATEK says:
+    // The SWP opcode works like a combination of LDR and STR, that means,
+    // it does read-rotated, but does write-unrotated.
+    gba.regs[rd] = gba.fetch_u32(addr & (!0x3)).rotate_right((addr & 0x3) * 8);
+    gba.write_u32(addr & (!0x3), val);
   }
 
   gba.clocks += gba.sequential_cycle()
@@ -375,7 +381,7 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     gba.regs[rd] = match opcode {
       1 => {
         // Load Unsigned halfword (zero-extended)
-        u32::from(gba.fetch_u16(addr))
+        u32::from(gba.fetch_u16(addr & (!0x1)).rotate_right((addr & 0x1) * 8))
       }
       2 => {
         // Load Signed byte (sign extended)
@@ -383,7 +389,13 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
       }
       3 => {
         // Load Signed halfword (sign extended)
-        i32::from(gba.fetch_u16(addr) as i16) as u32
+        if addr & 0x1 == 0 {
+          i32::from(gba.fetch_u16(addr) as i16) as u32
+        } else {
+          // unaligned, according to GBATEK:
+          //  LDRSH Rd,[odd]  -->  LDRSB Rd,[odd]         ;sign-expand BYTE value
+          i32::from(gba.fetch_byte(addr) as i8) as u32
+        }
       }
       0 => core::panic!(
         "Invalid instruction: Reserved 0 opcode load halfword_data_transfer_immediate_or_register_offset"
@@ -394,17 +406,17 @@ fn halfword_data_transfer_immediate_or_register_offset(gba: &mut GBA, opcode: u3
     match opcode {
       1 => {
         // Store halfword
-        gba.write_u16(addr, gba.regs[rd] as u16);
+        gba.write_u16(addr & (!0x1), gba.regs[rd] as u16);
       }
       2 => {
         // Load Doubleword
-        gba.regs[rd] = gba.fetch_u32(addr);
-        gba.regs[rd + 1] = gba.fetch_u32(addr.overflowing_add(4).0);
+        gba.regs[rd] = gba.fetch_u32(addr & (!0x3));
+        gba.regs[rd + 1] = gba.fetch_u32(addr.overflowing_add(4).0 & (!0x3));
       }
       3 => {
         // Store Doubleword
-        gba.write_u32(addr, gba.regs[rd]);
-        gba.write_u32(addr.overflowing_add(4).0, gba.regs[rd + 1]);
+        gba.write_u32(addr & (!0x3), gba.regs[rd]);
+        gba.write_u32(addr.overflowing_add(4).0 & (!0x3), gba.regs[rd + 1]);
       }
       0 => {
         // Reserved for SWP. Unreachable (Ensure we match SWP before this in decoding)
@@ -472,12 +484,12 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
       // Least significant byte
       u32::from(gba.fetch_byte(addr))
     } else {
-      gba.fetch_u32(addr & 0xFFFF_FFFC).rotate_right((addr & 0x0000_0003) * 8)
+      gba.fetch_u32(addr & (!0x3)).rotate_right((addr & 0x3) * 8)
     }
   } else if is_byte_size {
     gba.write_u8(addr, gba.regs[rd] as u8);
   } else {
-    gba.write_u32(addr, gba.regs[rd]);
+    gba.write_u32(addr & (!0x3), gba.regs[rd]);
   }
 
   if !is_pre_offseted {
@@ -485,7 +497,13 @@ fn single_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   }
 
   if (!is_pre_offseted || bit_21) && rn != rd {
-    gba.regs[rn] = addr;
+    if is_byte_size {
+      gba.regs[rn] = addr;
+    } else {
+      // Preserve the unaligned bits on writeback
+      //gba.regs[rn] = addr | (gba.regs[rn] & 0x3);
+      gba.regs[rn] = addr;
+    }
   }
 
   Ok(())
@@ -541,10 +559,12 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   let push_or_pop_operation: PushPopOp = if is_push {
     |gba, get_mut_reg, reg, sp| {
       let val = *get_mut_reg(gba, reg);
-      gba.write_u32(sp, val)
+      gba.write_u32(sp & (!0x3), val)
     }
   } else {
-    |gba, get_mut_reg, reg, sp| *get_mut_reg(gba, reg) = gba.fetch_u32(sp)
+    |gba, get_mut_reg, reg, sp| {
+      *get_mut_reg(gba, reg) = gba.fetch_u32(sp & (!0x3)).rotate_right((sp & 0x3) * 8)
+    }
   };
 
   type Operation = fn(&mut GBA, MutRegGetter, usize, &mut u32, PushPopOp, fn(&mut u32));
@@ -561,6 +581,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   };
 
   let mut sp = *get_mut_reg(gba, rn);
+  let unaligned_sp_bits = sp & 0x3;
   let mut sp_was_last_modified_reg = false;
   let mut n = 0;
 
@@ -615,7 +636,7 @@ fn block_data_transfer(gba: &mut GBA, opcode: u32) -> ARMResult {
   // Load & sp in rlist => dont write
   // store & sp last reg modified => dont write
   if write_back && !sp_was_last_modified_reg {
-    *get_mut_reg(gba, rn) = sp;
+    *get_mut_reg(gba, rn) = sp | unaligned_sp_bits;
   }
 
   if is_psr {
