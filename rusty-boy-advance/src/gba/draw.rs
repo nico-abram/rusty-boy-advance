@@ -532,8 +532,33 @@ pub fn draw_sprite(
     (base_size3, base_size2)
   };
 
+  let tile_idx_in_page = tile_idx as u32 & (0x4000 - 1);
+  let sp_page0 = 4;
+  let tile_page = sp_page0 + if tile_idx & 0x4000 != 0 { 1 } else { 0 };
+  let mut out_bytes = alloc::vec![0u8; size_x  as usize * size_y as usize * 3];
+  for tile_x in 0..(size_x / 8) {
+    for tile_y in 0..(size_y / 8) {
+      let tile_rgb = get_tile(
+        gba,
+        tile_page,
+        tile_idx_in_page + tile_x + tile_y * (size_x / 8),
+        bpp8,
+        (palette_idx + 0x10) as u8,
+      );
+      let tile_size = 8 * 8 * 3;
+      let stride_y = size_x * 3;
+      let stride_x = 8 * 3;
+      let start_idx = tile_x * stride_x + tile_y * stride_y * 8;
+      let start_idx = start_idx as usize;
+      for y_within_tile in 0..8 {
+        out_bytes[start_idx + y_within_tile * stride_y as usize..][..8 * 3]
+          .copy_from_slice(&tile_rgb[y_within_tile * 8 * 3..][..8 * 3]);
+      }
+    }
+  }
+
   (
-    alloc::vec![0u8; size_x  as usize * size_y as usize * 3],
+    out_bytes,
     y as u32,
     x as u32,
     size_x,

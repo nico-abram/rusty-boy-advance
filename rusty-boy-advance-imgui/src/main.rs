@@ -1048,10 +1048,12 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               let (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx) = sprite_metadata[sprite_idx];
               ui.same_line();
               imgui::Image::new(sprite_tex_id, [size_x as f32, size_y as f32])
+                .uv1([size_x as f32 / 64.0, size_y as f32 / 64.0])
                 .build(ui);
               if ui.is_item_hovered() {
               ui.tooltip(||{
                 imgui::Image::new(sprite_tex_id, [(size_x *4) as f32, (size_y *4)as f32])
+                .uv1([size_x as f32 / 64.0, size_y as f32 / 64.0])
                   .build(ui);
                 ui.text(&format!("Sprite index: {sprite_idx}"));
                 ui.text(&format!("X: {x_pos:08X}"));
