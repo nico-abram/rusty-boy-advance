@@ -1,4 +1,4 @@
-use super::gba::{GBA, VIDEO_HEIGHT, VIDEO_WIDTH};
+use super::gba::{DISPCNT_ADDR, GBA, VIDEO_HEIGHT, VIDEO_WIDTH};
 
 const TILE_WIDTH: u32 = 8;
 const TILE_HEIGHT: u32 = 8;
@@ -20,6 +20,7 @@ fn bgcnt(gba: &mut GBA, bg_num: u32) -> u32 {
   fetch_u16_iomem(gba, BG0CNT + bg_num * 2) as u32
 }
 
+const TILE_DATA_PAGE_SP0: u32 = 4;
 const TILE_MAP_PAGE_SIZE: u32 = 2 * 1024;
 const TILE_DATA_PAGE_SIZE: u32 = 16 * 1024;
 pub const TILE_DATA_PAGE_TILE_COUNT_BPP8: u32 = TILE_DATA_PAGE_SIZE / (64 * 64);
@@ -69,14 +70,34 @@ fn bytes_per_tile(full_palette: bool) -> u32 {
 #[allow(clippy::identity_op)]
 #[allow(clippy::redundant_closure_call)]
 #[inline]
-fn color_to_rgb(color: u16) -> (u8, u8, u8) {
+fn _color_to_rgb(color: u16) -> (u8, u8, u8) {
   let r = ((color >> 0) & 0x001F) as u8;
   let g = ((color >> 5) & 0x001F) as u8;
   let b = ((color >> 10) & 0x001F) as u8;
-
+  (r, g, b)
+}
+#[inline]
+fn color_to_rgb_basic(color: u16) -> (u8, u8, u8) {
+  let (r, g, b) = _color_to_rgb(color);
   let col5_to_col8 = |x| (x << 3) | (x >> 2);
   (col5_to_col8(r), col5_to_col8(g), col5_to_col8(b))
 }
+#[inline]
+fn color_to_rgb_simple(color: u16) -> (u8, u8, u8) {
+  let (r, g, b) = _color_to_rgb(color);
+  color_correct_simple(r, g, b)
+}
+#[inline]
+fn color_to_rgb_simple2(color: u16) -> (u8, u8, u8) {
+  let (r, g, b) = _color_to_rgb(color);
+  unsafe { color_correct_simple_funsafe(r, g, b) }
+}
+#[inline]
+fn color_to_rgb_correct(color: u16) -> (u8, u8, u8) {
+  let (r, g, b) = _color_to_rgb(color);
+  color_correct(r, g, b)
+}
+const color_to_rgb: fn(u16) -> (u8, u8, u8) = color_to_rgb_simple2;
 
 fn write_color(output: &mut [u8], color: u16) {
   let color = color_to_rgb(color);
@@ -121,7 +142,9 @@ pub fn get_tile(
     draw_mode0_bg_tile_hstrip(
       gba,
       &mut output[strip_idx * 8 * 3..],
-      (palette_number as u32) << 12,
+      false,
+      false,
+      palette_number,
       tile_addr,
       bpp8,
       strip_idx,
@@ -137,7 +160,7 @@ pub fn get_mode0_bg_tile(
   bg_num: u32,
   tile_x: u32,
   tile_y: u32,
-) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32) {
+) -> (alloc::vec::Vec<u8>, u32, u32, u32, u16) {
   let background_control_flags = bgcnt(gba, bg_num);
   let (
     _priority,
@@ -163,15 +186,17 @@ pub fn get_mode0_bg_tile(
   // See http://problemkaputt.de/gbatek.htm#lcdvrambgscreendataformatbgmap
   let tile_map_element = u32::from(fetch_u16_vram(gba, tile_map_element_addr as u16));
 
-  let tile_number = tile_map_element & 0x3FF;
-  let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
+  let (h_flip, v_flip, palette_number, tile_number) = parse_tile_map_element(tile_map_element);
+  let tile_addr = tile_data_base_addr + tile_number as u32 * bytes_per_tile;
 
   let mut output = alloc::vec![0u8; 8 * 8*3];
   for strip_idx in 0..8 {
     draw_mode0_bg_tile_hstrip(
       gba,
       &mut output[strip_idx * 8 * 3..],
-      tile_map_element,
+      h_flip,
+      v_flip,
+      palette_number,
       tile_addr,
       full_palette,
       strip_idx,
@@ -181,18 +206,28 @@ pub fn get_mode0_bg_tile(
   (output, tile_map_element_addr, tile_addr, tile_map_element, tile_number)
 }
 
+/// (h_flip, v_flip, palette_number, tile_number)
+fn parse_tile_map_element(tile_map_element: u32) -> (bool, bool, u8, u16) {
+  let h_flip = (tile_map_element & H_FLIP_MAP_BIT) != 0;
+  let v_flip: bool = (tile_map_element & V_FLIP_MAP_BIT) != 0;
+  let palette_number = (tile_map_element >> 12) & 0x1F;
+  let tile_number = tile_map_element & 0x3FF;
+  (h_flip, v_flip, palette_number as u8, tile_number as u16)
+}
 /// Draws an 8 pixel horizontal strip into the output slice
 /// Returns true if any pixels are transparent
 pub fn draw_mode0_bg_tile_hstrip(
   gba: &mut GBA,
   output: &mut [u8],
-  tile_map_element: u32,
+  h_flip: bool,
+  v_flip: bool,
+  palette_number: u8,
   tile_addr: u32,
   full_palette: bool,
   mut strip_idx_in_tile: usize,
 ) {
-  let h_flip = (tile_map_element & H_FLIP_MAP_BIT) != 0;
-  let v_flip: bool = (tile_map_element & V_FLIP_MAP_BIT) != 0;
+  //let h_flip = (tile_map_element & H_FLIP_MAP_BIT) != 0;
+  //let v_flip: bool = (tile_map_element & V_FLIP_MAP_BIT) != 0;
   if v_flip {
     strip_idx_in_tile = 7 - strip_idx_in_tile;
   }
@@ -213,9 +248,9 @@ pub fn draw_mode0_bg_tile_hstrip(
   } else {
     // 4 bits per pixel
     let palette_base = {
-      let palette_number = (tile_map_element >> 12) & 0x1F;
+      //let palette_number = (tile_map_element >> 12) & 0x1F;
       // Each sub palette has 16 colors of 2 bytes each
-      (palette_number * 16 * 2) as usize
+      (palette_number as u32 * 16 * 2) as usize
     };
     let start_idx = strip_idx_in_tile * 4;
     let end_idx = start_idx + 4;
@@ -297,22 +332,56 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
     (priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y))
   });
 
-  // 4 is a sentinel value indicating no bg
-  let mut bgs_to_draw = [4, 4, 4, 4, 4, 4];
-  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
-    if display_control & (1 << (8 + idx)) != 0 {
-      let priority = bg_data.0 as usize;
-      if bgs_to_draw[priority] == 4 {
-        bgs_to_draw[priority] = idx;
-      } else if bgs_to_draw[priority as usize + 1] == 4 {
-        bgs_to_draw[priority + 1] = idx;
-      } else if bgs_to_draw[priority as usize + 2] == 4 {
-        bgs_to_draw[priority + 2] = idx;
-      } else {
-        unimplemented!("matching BG priority is unimplemented")
-      }
+  struct PriorityDrawLayer {
+    implicit_priority: u8,
+    priority: u8,
+    layer: u8,
+  }
+  impl PriorityDrawLayer {
+    fn is_bg(&self) -> bool {
+      (self.layer & 0x80) == 0
+    }
+    fn idx(&self) -> usize {
+      (self.layer & 0x7F) as usize
     }
   }
+  let mut priority_array: [_; { 128 + 4 }] =
+    core::array::from_fn(|_| PriorityDrawLayer { implicit_priority: 0, priority: 0, layer: 0 });
+  let mut priority_array_fill_size = 0;
+  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
+    let enabled = display_control & (1 << (8 + idx)) != 0;
+    if enabled {
+      let elem = &mut priority_array[priority_array_fill_size];
+      elem.priority = bg_data.0;
+      elem.implicit_priority = 4 - idx as u8;
+      elem.layer = idx as u8;
+      priority_array_fill_size += 1;
+    }
+  }
+
+  let mut sprite_data_arr: [_; 128] = core::array::from_fn(|_| (0u16, 0u16, 0u16));
+  for sprite_idx in 0..128 {
+    let sprite_data = fetch_sprite(gba, sprite_idx);
+    sprite_data_arr[sprite_idx as usize] = sprite_data;
+    let (y, obj_mode, _, _, _, shape) = parse_sprite_attr0(sprite_data.0);
+    let (_, _, _, _, size) = parse_sprite_attr1(sprite_data.1);
+    let (_size_x, size_y) = sprite_size(size, shape);
+
+    let not_hidden = obj_mode != 0b10;
+    let (y_min, y_max) = (y as u32, y as u32 + (size_y - 1) as u32);
+    let in_scanline = scanline >= y_min && scanline <= y_max;
+    if not_hidden && in_scanline {
+      let (_, priority, _) = parse_sprite_attr2(sprite_data.2);
+      let elem = &mut priority_array[priority_array_fill_size];
+      elem.priority = priority;
+      elem.implicit_priority = (127 - sprite_idx as u8) | 0x80;
+      elem.layer = sprite_idx as u8 | 0x80;
+      priority_array_fill_size += 1;
+    }
+  }
+  priority_array[..priority_array_fill_size].sort_unstable_by(|a, b| {
+    a.priority.cmp(&b.priority).then(a.implicit_priority.cmp(&b.implicit_priority).reverse())
+  });
 
   let draw_scanline_for_bg = |gba: &mut GBA,
                               bg_data: &BgData,
@@ -349,13 +418,15 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
         + (bg_tile_y_in_screenblock * 2 * 32);
       let tile_map_element = fetch_u16_vram(gba, tile_map_element_addr as u16) as u32;
 
-      let tile_number = tile_map_element & 0x3FF;
-      let tile_addr = tile_data_base_addr + tile_number * bytes_per_tile;
+      let (h_flip, v_flip, palette_number, tile_number) = parse_tile_map_element(tile_map_element);
+      let tile_addr = tile_data_base_addr + tile_number as u32 * bytes_per_tile;
 
       draw_mode0_bg_tile_hstrip(
         gba,
         &mut output_pxs,
-        tile_map_element,
+        h_flip,
+        v_flip,
+        palette_number,
         tile_addr,
         *full_palette,
         strip_in_tile,
@@ -399,6 +470,126 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
     }
     if needs_extra_strip {}
   };
+
+  let transparent_color = fetch_u16(&gba.palette_ram[..], 0);
+  let transparent_color = color_to_rgb(transparent_color);
+  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
+  for x in gba.output_texture[scanline_first_px_idx..][..VIDEO_WIDTH * 3].chunks_exact_mut(3) {
+    x[2] = transparent_color.2;
+    x[1] = transparent_color.1;
+    x[0] = transparent_color.0;
+  }
+  let first_bg = false;
+  for draw_layer in &priority_array[..priority_array_fill_size] {
+    if draw_layer.is_bg() {
+      let bg_data = &bg_data_arr[draw_layer.idx()];
+      draw_scanline_for_bg(gba, bg_data, first_bg, scanline_first_px_idx);
+    } else {
+      // sprite
+      let &(attr0, attr1, attr2) = &sprite_data_arr[draw_layer.idx()];
+
+      let (y, obj_mode, gfx_mode, mosaic, bpp8, shape) = parse_sprite_attr0(attr0);
+
+      let (x, affine_idx, h_flip, v_flip, size) = parse_sprite_attr1(attr1);
+
+      let (tile_idx, priority, palette_number) = parse_sprite_attr2(attr2);
+
+      let (size_x, size_y) = sprite_size(size, shape);
+      let tile_count_x = size_x as u32 / 8;
+
+      let bytes_per_bpp4_tile = bytes_per_tile(false);
+      let tile_data_base_addr =
+        TILE_DATA_PAGE_SP0 * TILE_DATA_PAGE_SIZE + tile_idx as u32 * bytes_per_bpp4_tile;
+      let bytes_per_tile = bytes_per_tile(bpp8);
+
+      let stride_1d = display_control & 0x40 != 0;
+      let char_stride_y_tiles = if stride_1d { tile_count_x } else { 32 } * bytes_per_bpp4_tile;
+
+      let mut output_pxs = [0u8; 8 * 3];
+      let y_within_sprite = scanline - y as u32;
+      let sprite_tile_y = y_within_sprite / 8;
+      let sprite_tile_y =
+        if v_flip { (size_y as u32 / 8) - 1 - sprite_tile_y } else { sprite_tile_y };
+      let strip_in_tile = y_within_sprite % 8;
+      let size_x_in_tiles = size_x / 8;
+      for tile_x in 0..size_x_in_tiles {
+        let in_tile_x = if h_flip { size_x_in_tiles - 1 - tile_x } else { tile_x };
+        let tile_addr = tile_data_base_addr
+          + in_tile_x as u32 * bytes_per_bpp4_tile
+          + sprite_tile_y * char_stride_y_tiles;
+
+        draw_mode0_bg_tile_hstrip(
+          gba,
+          &mut output_pxs,
+          h_flip,
+          v_flip,
+          palette_number + 0x10,
+          tile_addr,
+          bpp8,
+          strip_in_tile as usize,
+        );
+        let x_offset = x as usize + tile_x as usize * 8;
+        if x_offset + 8 < VIDEO_WIDTH {
+          let out_slice = &mut gba.output_texture[scanline_first_px_idx + x_offset * 3..][..8 * 3];
+          for (out, in_) in out_slice.chunks_exact_mut(3).zip(output_pxs.chunks_exact(3)) {
+            if out[0] == transparent_color.0
+              && out[1] == transparent_color.1
+              && out[2] == transparent_color.2
+            {
+              out.copy_from_slice(in_);
+            }
+          }
+        } else {
+          // TODO: Partial last tile
+        }
+        //gba.output_texture[scanline_first_px_idx..][..8 * 3].copy_from_slice(&output_pxs);
+      }
+      /*
+      let tile_idx_in_page = tile_idx as u32 & (0x4000 - 1);
+      let sp_page0 = 4;
+      let tile_page = sp_page0 + if tile_idx & 0x4000 != 0 { 1 } else { 0 };
+      let mut out_bytes = alloc::vec![0u8; size_x  as usize * size_y as usize * 3];
+      for tile_x in 0..(size_x / 8) {
+        for tile_y in 0..(size_y / 8) {
+          let char_stride_y_tiles = if stride_1d { tile_count_x } else { 32 };
+          let tile_rgb = get_tile(
+            gba,
+            tile_page,
+            tile_idx_in_page + tile_x + tile_y * char_stride_y_tiles,
+            bpp8,
+            (palette_idx + 0x10) as u8,
+          );
+          let stride_y = size_x * 3;
+          let stride_x = 8 * 3;
+          let start_idx = tile_x * stride_x + tile_y * stride_y * 8;
+          let start_idx = start_idx as usize;
+          for y_within_tile in 0..8 {
+            out_bytes[start_idx + y_within_tile * stride_y as usize..][..8 * 3]
+              .copy_from_slice(&tile_rgb[y_within_tile * 8 * 3..][..8 * 3]);
+          }
+        }
+      }
+      */
+    }
+  }
+  return;
+
+  // 4 is a sentinel value indicating no bg
+  let mut bgs_to_draw = [4, 4, 4, 4, 4, 4];
+  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
+    if display_control & (1 << (8 + idx)) != 0 {
+      let priority = bg_data.0 as usize;
+      if bgs_to_draw[priority] == 4 {
+        bgs_to_draw[priority] = idx;
+      } else if bgs_to_draw[priority as usize + 1] == 4 {
+        bgs_to_draw[priority + 1] = idx;
+      } else if bgs_to_draw[priority as usize + 2] == 4 {
+        bgs_to_draw[priority + 2] = idx;
+      } else {
+        unimplemented!("matching BG priority is unimplemented")
+      }
+    }
+  }
 
   let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
   let mut first_bg = true;
@@ -494,58 +685,86 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
   }
 }
 
-pub fn draw_sprite(
-  gba: &mut GBA,
-  sprite_idx: u8,
-) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32, u32, u32, u32) {
+fn fetch_sprite(gba: &mut GBA, sprite_idx: u8) -> (u16, u16, u16) {
   let oam_idx = sprite_idx as usize * 8;
   let attr0 = fetch_u16(&gba.oam[..], oam_idx + 0);
   let attr1 = fetch_u16(&gba.oam[..], oam_idx + 2);
   let attr2 = fetch_u16(&gba.oam[..], oam_idx + 4);
+  (attr0, attr1, attr2)
+}
 
+/// (y, obj_mode, gfx_mode, mosaic, bpp8, shape)
+fn parse_sprite_attr0(attr0: u16) -> (u8, u8, u8, bool, bool, u8) {
   let y = attr0 & 0x00FF;
-  let obj_mode = attr0 & 0x0300;
-  let gfx_mode = attr0 & 0x0C00;
+  let obj_mode = (attr0 & 0x0300) >> 8;
+  let gfx_mode = (attr0 & 0x0C00) >> 10;
   let mosaic = attr0 & 0x1000 != 0;
   let bpp8 = attr0 & 0x2000 != 0;
-  let shape = attr0 & 0xC000;
-
+  let shape = (attr0 & 0xC000) >> 14;
+  (y as u8, obj_mode as u8, gfx_mode as u8, mosaic, bpp8, shape as u8)
+}
+/// (x, affine_idx, hflip, vflip, size)
+fn parse_sprite_attr1(attr1: u16) -> (u16, u8, bool, bool, u8) {
   let x = attr1 & 0x01FF;
   let affine_idx = (attr1 & 0x3E00) >> 9;
   let hflip = attr1 & 0x1000 != 0;
   let vflip = attr1 & 0x2000 != 0;
   let size = (attr1 & 0xC000) >> 14;
-
+  (x as u16, affine_idx as u8, hflip, vflip, size as u8)
+}
+/// (tile_idx, priority, palette_idx)
+fn parse_sprite_attr2(attr2: u16) -> (u16, u8, u8) {
   let tile_idx = attr2 & 0x03FF;
   let priority = (attr2 & 0x0C00) >> 10;
   let palette_idx = (attr2 & 0xF000) >> 12;
-
+  (tile_idx as u16, priority as u8, palette_idx as u8)
+}
+fn sprite_size(size: u8, shape: u8) -> (u8, u8) {
   let base_size = 8 << size;
   let base_size2 = 8 << size.saturating_sub(1);
   let base_size3 = 16 << ((size + 1) >> 1);
-  let (size_x, size_y) = if shape == 0b00 {
+  if shape == 0b00 {
     (base_size, base_size)
-  } else if shape == 0xb01 {
-    (base_size2, base_size3)
+  } else if shape == 0x01 {
+    (base_size3, base_size2)
   } else {
     // 10
-    (base_size3, base_size2)
-  };
+    (base_size2, base_size3)
+  }
+}
+
+pub fn draw_sprite(
+  gba: &mut GBA,
+  sprite_idx: u8,
+) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32, u32, u32, u32, u8, u8, u8) {
+  let (attr0, attr1, attr2) = fetch_sprite(gba, sprite_idx);
+
+  let (y, obj_mode, gfx_mode, mosaic, bpp8, shape) = parse_sprite_attr0(attr0);
+
+  let (x, affine_idx, hflip, vflip, size) = parse_sprite_attr1(attr1);
+
+  let (tile_idx, priority, palette_idx) = parse_sprite_attr2(attr2);
+
+  let (size_x, size_y) = sprite_size(size, shape);
+  let size_x = size_x as u32;
+  let size_y = size_y as u32;
+  let tile_count_x = size_x / 8;
+
+  let stride_1d = gba.fetch_u16(super::gba::DISPCNT_ADDR) & 0x40 != 0;
 
   let tile_idx_in_page = tile_idx as u32 & (0x4000 - 1);
-  let sp_page0 = 4;
-  let tile_page = sp_page0 + if tile_idx & 0x4000 != 0 { 1 } else { 0 };
+  let tile_page = TILE_DATA_PAGE_SP0 + if tile_idx & 0x4000 != 0 { 1 } else { 0 };
   let mut out_bytes = alloc::vec![0u8; size_x  as usize * size_y as usize * 3];
   for tile_x in 0..(size_x / 8) {
     for tile_y in 0..(size_y / 8) {
+      let char_stride_y_tiles = if stride_1d { tile_count_x } else { 32 };
       let tile_rgb = get_tile(
         gba,
         tile_page,
-        tile_idx_in_page + tile_x + tile_y * (size_x / 8),
+        tile_idx_in_page + tile_x + tile_y * char_stride_y_tiles,
         bpp8,
         (palette_idx + 0x10) as u8,
       );
-      let tile_size = 8 * 8 * 3;
       let stride_y = size_x * 3;
       let stride_x = 8 * 3;
       let start_idx = tile_x * stride_x + tile_y * stride_y * 8;
@@ -564,7 +783,116 @@ pub fn draw_sprite(
     size_x,
     size_y,
     tile_idx as u32,
-    tile_idx as u32 + 0x1337,
+    tile_idx as u32 * bytes_per_tile(false),
     palette_idx as u32,
+    size,
+    shape,
+    priority,
+  )
+}
+
+// Less accurate but faster version of color_correct_simple
+#[inline]
+unsafe fn color_correct_simple_funsafe(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+  use std::intrinsics::*;
+  let f1 = |x: u8| {
+    //let lcd_gamma = 4.0;
+
+    let x = fdiv_fast(x as f32, 31.0);
+    fmul_fast(fmul_fast(fmul_fast(x, x), x), x)
+    //x.powf(lcd_gamma)
+  };
+
+  let (r, g, b) = (f1(r), f1(g), f1(b));
+
+  pub fn rsqrt(x: f32) -> f32 {
+    unsafe { std::intrinsics::fdiv_fast(1.0, x.sqrt()) }
+  }
+
+  let f2 = |r: f32, g: f32, b: f32, rc: f32, gc: f32, bc: f32| {
+    //let out_gamma = 2.2;
+    //let out_gamma_c = 1.0 / out_gamma;
+    let x =
+      fdiv_fast(fadd_fast(fadd_fast(fmul_fast(r, rc), fmul_fast(g, gc)), fmul_fast(b, bc)), 255.0);
+    //let x = x.powf(out_gamma_c);
+    let x = x.sqrt();
+    //let x_16 = rsqrt(rsqrt(rsqrt(x)));
+    //let x = x * x_16 / rsqrt(rsqrt(x_16));
+    let k = fdiv_fast(fmul_fast(255.0, 255.0), 280.0);
+    fmul_fast(x, k) //.clamp(0.0, 255.0)
+  };
+  let (r, g, b) =
+    (f2(r, g, b, 240.0, 50.0, 0.0), f2(r, g, b, 10.0, 230.0, 10.0), f2(r, g, b, 10.0, 30.0, 220.0));
+
+  (r as u8, g as u8, b as u8)
+}
+#[inline]
+fn color_correct_simple(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+  let lcd_gamma = 4.0;
+  let out_gamma = 2.2;
+  let (r, g, b) = (r as f32 / 31.0, g as f32 / 31.0, b as f32 / 31.0);
+  let (r, g, b) = (r.powf(lcd_gamma), g.powf(lcd_gamma), b.powf(lcd_gamma));
+  let (r, g, b) = (
+    (((r * 240.0 + 50.0 * g + b * 0.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
+      .clamp(0.0, 255.0),
+    (((r * 10.0 + 230.0 * g + b * 10.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
+      .clamp(0.0, 255.0),
+    (((r * 10.0 + 30.0 * g + b * 220.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
+      .clamp(0.0, 255.0),
+  );
+  (r as u8, g as u8, b as u8)
+}
+// source: https://github.com/nba-emu/NanoBoyAdvance/blob/master/src/platform/core/src/device/shader/color_agb.glsl.hpp
+fn color_correct(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+  let darken_screen = 1.0;
+  let target_gamma = 2.2;
+  let display_gamma = 2.2;
+  let sat = 1.0;
+  let lum = 0.94;
+  let contrast = 1.0;
+  //let blr = 0.0;
+  //let blg = 0.0;
+  //let blb = 0.0;
+  let r_ = 0.82;
+  let g_ = 0.665;
+  let b_ = 0.73;
+  let rg = 0.125;
+  let rb = 0.195;
+  let gr = 0.24;
+  let gb = 0.075;
+  let br = -0.06;
+  let bg = 0.21;
+  //let overscan_percent_x = 0.0;
+  //let overscan_percent_y = 0.0;
+
+  let (r, g, b) = (r as f64 / 31.0, g as f64 / 31.0, b as f64 / 31.0);
+
+  let p = target_gamma + darken_screen;
+  let (r, g, b) = (r.powf(p), g.powf(p), b.powf(p));
+
+  fn lerp(a: f64, b: f64, c: f64) -> f64 {
+    (1.0 - b) * a + b * c
+  }
+  let (r, g, b) =
+    (lerp(r, 0.5, 1.0 - contrast), lerp(g, 0.5, 1.0 - contrast), lerp(b, 0.5, 1.0 - contrast));
+
+  let (r, g, b) = ((r * lum).clamp(0.0, 1.0), (g * lum).clamp(0.0, 1.0), (b * lum).clamp(0.0, 1.0));
+
+  let adjust_a = (1.0 - sat) * 0.3086;
+  let adjust_b = (1.0 - sat) * 0.6094;
+  let adjust_c = (1.0 - sat) * 0.0820;
+  let (r, g, b) = (
+    r * (adjust_a + sat) * r_ + r * adjust_b * rg + r * adjust_c * rb,
+    g * adjust_a * gr + g * (adjust_b + sat) * g_ + g * adjust_c * gb,
+    b * adjust_a * br + b * adjust_b * bg + b * (adjust_c + sat) * b_,
+  );
+
+  let (r, g, b) =
+    (r.powf(1.0 / display_gamma), g.powf(1.0 / display_gamma), b.powf(1.0 / display_gamma));
+
+  (
+    (r * 255.0).clamp(0.0, 255.0) as u8,
+    (g * 255.0).clamp(0.0, 255.0) as u8,
+    (b * 255.0).clamp(0.0, 255.0) as u8,
   )
 }

@@ -1,6 +1,7 @@
 #![feature(test)]
 #![feature(iterator_try_collect)]
 #![feature(core_intrinsics)]
+#![feature(portable_simd)]
 #![no_std]
 //#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 

@@ -4,10 +4,7 @@
 use capstone::prelude::*;
 use copypasta::ClipboardProvider;
 use glium::{
-  Texture2d,
-  backend::Facade,
-  texture::{ClientFormat, RawImage2d},
-  uniforms::SamplerBehavior,
+  backend::Facade, texture::{ClientFormat, RawImage2d}, uniforms::{MagnifySamplerFilter, MinifySamplerFilter, Sampler, SamplerBehavior}, Texture2d
 };
 use imgui::{sys::igDockBuilderAddNode, Condition, ImString, InputTextFlags, SelectableFlags, StyleVar, TextureId};
 use imgui_winit_support::winit::{dpi::Size, event::ElementState};
@@ -203,7 +200,10 @@ fn imgui_glium_texture(system:&mut support::System, width:u32, height:u32, data:
       format: ClientFormat::U8U8U8,
     };
     let tex2d = Texture2d::new(system.display.get_context(), raw).unwrap();
-    imgui_glium_renderer::Texture { texture: tex2d.into(), sampler: SamplerBehavior::default() }
+    let mut sampler = SamplerBehavior::default();
+    sampler.minify_filter = MinifySamplerFilter::Nearest;
+    sampler.magnify_filter = MagnifySamplerFilter::Nearest;
+    imgui_glium_renderer::Texture { texture: tex2d.into(), sampler}
   };
   let texture_id = system.renderer.textures().insert(gl_texture);
   texture_id
@@ -219,9 +219,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let video_output_texture_id = imgui_glium_texture(&mut system, WIDTH, HEIGHT, gba.video_output().into());
   
   let sprite_texture_ids: [_; 128] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 64, 64, vec![0u8; 64*64*3]));
-  let mut sprite_metadata: [_; 128] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32)});
+  let mut sprite_metadata: [_; 128] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u8, 0u8, 0u8)});
   let bg_tile_texture_ids: [_; 32*32] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
-  let mut bg_tile_metadata: [_; 32*32] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32)});
+  let mut bg_tile_metadata: [_; 32*32] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u16)});
   let tile_texture_ids: [_; 512] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 8, 8, vec![0u8; 8*8*3]));
   let mut bg_viewer_bg_idx = 0;
   let  mut tile_viewer_tile_page = 0;
@@ -1029,7 +1029,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let sprite_tex_id = sprite_texture_ids[sprite_idx];
 
                 let texture = renderer.textures().get(sprite_tex_id).unwrap();
-                let (sprite_rgb_bytes,x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx) = rusty_boy_advance::draw::draw_sprite(&mut gba, sprite_idx as u8);
+                let (sprite_rgb_bytes,x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx, size, shape, priority) = rusty_boy_advance::draw::draw_sprite(&mut gba, sprite_idx as u8);
                 let raw = RawImage2d {
                   data: Cow::Owned(sprite_rgb_bytes.into()),
                   width: size_x,
@@ -1037,7 +1037,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                   format: ClientFormat::U8U8U8,
                 };
                 texture.texture.write(glium::Rect { left: 0, bottom: 0, width: size_x, height: size_y }, raw);
-                sprite_metadata[sprite_idx] = (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx);
+                sprite_metadata[sprite_idx] = (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx, size, shape, priority);
             }
           }
           
@@ -1045,7 +1045,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           for sprite_idx in 0..128 {
             ui.spacing();
               let sprite_tex_id = sprite_texture_ids[sprite_idx];
-              let (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx) = sprite_metadata[sprite_idx];
+              let (x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx, size, shape, priority) = sprite_metadata[sprite_idx];
               ui.same_line();
               imgui::Image::new(sprite_tex_id, [size_x as f32, size_y as f32])
                 .uv1([size_x as f32 / 64.0, size_y as f32 / 64.0])
@@ -1062,6 +1062,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 ui.text(&format!("tile_idx: {tile_idx:08X}"));
                 ui.text(&format!("tile_addr: {tile_addr:08X}"));
                 ui.text(&format!("palette_idx: {palette_idx}"));
+                ui.text(&format!("size: {size:02X}"));
+                ui.text(&format!("shape: {shape:02X}"));
+                ui.text(&format!("priority: {priority}"));
               });
             }
           }
