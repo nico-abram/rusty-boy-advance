@@ -238,8 +238,9 @@ fn coprocessor_register_transfer(_opcode: u32) -> String {
 }
 
 /// Single data swap (SWP)
-fn software_interrupt(_opcode: u32) -> String {
-  "SWI".into()
+fn software_interrupt(opcode: u32) -> String {
+  let comment = opcode & 0xFF;
+  format!("SWI #${comment:02X}")
 }
 
 /// Branch or Branch and link (B or BL)
