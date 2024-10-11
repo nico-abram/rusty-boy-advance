@@ -392,13 +392,23 @@ impl GBA {
   pub(crate) fn write_u32(&mut self, addr: u32, value: u32) {
     self.write_u16_inline(addr, value as u16);
     self.write_u16_inline(addr + 2, (value >> 16) as u16);
-    if addr & 0xFFFF_FF00 == 0x0400_0000 && (value & 0x0000_8000) != 0 {
-      match addr {
-        0x0400_00BA => self.do_dma(0), // DMA 0
-        0x0400_00C6 => self.do_dma(1), // DMA 1
-        0x0400_00D2 => self.do_dma(2), // DMA 2
-        0x0400_00DE => self.do_dma(3), // DMA 3
-        _ => (),
+    if addr & 0xFFFF_FF00 == 0x0400_0000 {
+      if (value & 0x0000_8000) != 0 {
+        match addr {
+          0x0400_00BA => self.do_dma(0), // DMA 0
+          0x0400_00C6 => self.do_dma(1), // DMA 1
+          0x0400_00D2 => self.do_dma(2), // DMA 2
+          0x0400_00DE => self.do_dma(3), // DMA 3
+          _ => (),
+        }
+      } else if (value & 0x8000_0000) != 0 {
+        match addr {
+          0x0400_00B8 => self.do_dma(0), // DMA 0
+          0x0400_00C4 => self.do_dma(1), // DMA 1
+          0x0400_00D0 => self.do_dma(2), // DMA 2
+          0x0400_00DC => self.do_dma(3), // DMA 3
+          _ => (),
+        }
       }
     }
   }
