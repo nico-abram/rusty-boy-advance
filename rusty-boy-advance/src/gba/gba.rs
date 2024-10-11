@@ -49,6 +49,7 @@ const NUM_VIRTUAL_HORIZONTAL_PIXELS: u16 = 68;
 const NUM_REAL_HORIZONTAL_PIXELS: u16 = VIDEO_WIDTH as u16;
 const NUM_HORIZONTAL_PIXELS: u16 = NUM_VIRTUAL_HORIZONTAL_PIXELS + NUM_REAL_HORIZONTAL_PIXELS;
 const HBLANK_CYCLES: u32 = (NUM_REAL_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXEL + 46;
+const DRAW_SCANLINE_CYCLES: u32 = (NUM_REAL_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXEL;
 pub const CLOCKS_PER_PIXEL: u32 = 4;
 pub const CLOCKS_PER_SCANLINE: u32 = (NUM_HORIZONTAL_PIXELS as u32) * CLOCKS_PER_PIXEL;
 const NUM_VIRTUAL_SCANLINES: u16 = 68;
@@ -615,7 +616,11 @@ impl GBA {
       {
         self.halted = false;
       } else {
-        self.clocks += 3;
+        if self.clocks % CLOCKS_PER_SCANLINE == HBLANK_CYCLES {
+          self.clocks += CLOCKS_PER_SCANLINE - HBLANK_CYCLES + 1;
+        } else {
+          self.clocks += HBLANK_CYCLES - self.clocks % CLOCKS_PER_SCANLINE;
+        }
         self.update_hvblank();
         self.clocks_at_last_instruction = self.clocks;
         return Ok(());
@@ -685,6 +690,7 @@ impl GBA {
     let clocks_within_scanline = self.clocks % CLOCKS_PER_SCANLINE;
     let clocks_within_scanline_pre_exec = clocks_pre_exec % CLOCKS_PER_SCANLINE;
 
+    let draw_scanline = clocks_within_scanline >= DRAW_SCANLINE_CYCLES;
     let hblank = clocks_within_scanline >= HBLANK_CYCLES;
     let vblank = row_offset >= NUM_REAL_SCANLINES;
 
@@ -692,19 +698,19 @@ impl GBA {
     let _prev_vcount = self.fetch_u16(VCOUNT_ADDR);
 
     let vcount_setting = (prev_status & 0xFF00) >> 8;
-    let vcounter_flag = vcount_setting == row_offset;
-    let vcounter_flag_pre = vcount_setting == row_offset_pre_exec;
+    let vcounter_flag = row_offset >= vcount_setting;
+    let vcounter_flag_pre = row_offset_pre_exec >= vcount_setting;
 
-    if row_offset != row_offset_pre_exec && row_offset_pre_exec < NUM_REAL_SCANLINES {
-      for row in row_offset_pre_exec..row_offset {
-        super::draw::draw_scanline(self, row as u32);
+    if draw_scanline && clocks_within_scanline_pre_exec < DRAW_SCANLINE_CYCLES {
+      if row_offset < NUM_REAL_SCANLINES {
+        super::draw::draw_scanline(self, row_offset as u32);
       }
     }
 
     if hblank && clocks_within_scanline_pre_exec < HBLANK_CYCLES {
       self.trigger_interrupt_if_enabled(HBLANK_IE_BIT);
     }
-    if row_offset == NUM_REAL_SCANLINES && row_offset_pre_exec != NUM_REAL_SCANLINES {
+    if vblank && row_offset_pre_exec < NUM_REAL_SCANLINES {
       self.trigger_interrupt_if_enabled(VBLANK_IE_BIT);
     }
 
