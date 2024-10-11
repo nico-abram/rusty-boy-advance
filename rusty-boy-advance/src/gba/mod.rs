@@ -1,3 +1,4 @@
+pub mod color_correct;
 mod cpsr;
 mod cpu_mode;
 pub mod draw;
@@ -35,7 +36,7 @@ impl GBABox {
     self.internal_gba.update_video_output()
   }
 
-  pub fn video_output(&self) -> &[u8] {
+  pub fn video_output(&self) -> &[u16] {
     &self.internal_gba.output_texture[..]
   }
 

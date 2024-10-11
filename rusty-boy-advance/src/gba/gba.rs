@@ -142,7 +142,7 @@ impl std::error::Error for GBAError {
 
 pub struct GBA {
   //// Output image
-  pub(crate) output_texture: [u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
+  pub(crate) output_texture: [u16; VIDEO_WIDTH * VIDEO_HEIGHT],
   /// Current registers. Swapped on mode change acordingly.
   pub(crate) regs: [u32; 16],
   /// FIQ-only banked registers.
@@ -192,7 +192,7 @@ impl GBA {
   ) -> Box<Self> {
     // Was still getting stack overflows without Box X
     let mut gba = Box::new(Self {
-      output_texture: [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3],
+      output_texture: [0x00_u16; VIDEO_WIDTH * VIDEO_HEIGHT],
       regs: [0_u32; 16],
       fiq_only_banks: [[0_u32; 5]; 2],
       all_modes_banks: [[0_u32; 2]; 6],
@@ -533,7 +533,7 @@ impl GBA {
     self.halted = false;
     self.executed_instructions_count = 0;
     self.regs = [0; 16];
-    self.output_texture = [0x00_u8; VIDEO_WIDTH * VIDEO_HEIGHT * 3];
+    self.output_texture = [0x00_u16; VIDEO_WIDTH * VIDEO_HEIGHT];
     self.fiq_only_banks = [[0_u32; 5]; 2];
     self.all_modes_banks = [[0_u32; 2]; 6];
     self.io_mem = [0_u8; 1022];

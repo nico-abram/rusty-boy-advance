@@ -64,46 +64,8 @@ fn bytes_per_tile(full_palette: bool) -> u32 {
   if full_palette { TILE_WIDTH * TILE_HEIGHT } else { TILE_WIDTH * (TILE_HEIGHT / 2) }
 }
 
-/// Fills three bytes starting at the given index in the given slice with the RGB values of the given
-/// 16 bit GBA color. See http://problemkaputt.de/gbatek.htm#lcdcolorpalettes for details.
-/// (the intensities 0-14 are practically all black, and only intensities 15-31 are resulting in visible medium.)
-#[allow(clippy::identity_op)]
-#[allow(clippy::redundant_closure_call)]
-#[inline]
-fn _color_to_rgb(color: u16) -> (u8, u8, u8) {
-  let r = ((color >> 0) & 0x001F) as u8;
-  let g = ((color >> 5) & 0x001F) as u8;
-  let b = ((color >> 10) & 0x001F) as u8;
-  (r, g, b)
-}
-#[inline]
-fn color_to_rgb_basic(color: u16) -> (u8, u8, u8) {
-  let (r, g, b) = _color_to_rgb(color);
-  let col5_to_col8 = |x| (x << 3) | (x >> 2);
-  (col5_to_col8(r), col5_to_col8(g), col5_to_col8(b))
-}
-#[inline]
-fn color_to_rgb_simple(color: u16) -> (u8, u8, u8) {
-  let (r, g, b) = _color_to_rgb(color);
-  color_correct_simple(r, g, b)
-}
-#[inline]
-fn color_to_rgb_simple2(color: u16) -> (u8, u8, u8) {
-  let (r, g, b) = _color_to_rgb(color);
-  unsafe { color_correct_simple_funsafe(r, g, b) }
-}
-#[inline]
-fn color_to_rgb_correct(color: u16) -> (u8, u8, u8) {
-  let (r, g, b) = _color_to_rgb(color);
-  color_correct(r, g, b)
-}
-const color_to_rgb: fn(u16) -> (u8, u8, u8) = color_to_rgb_simple2;
-
-fn write_color(output: &mut [u8], color: u16) {
-  let color = color_to_rgb(color);
-  output[0] = color.0;
-  output[1] = color.1;
-  output[2] = color.2;
+fn write_color(output: &mut [u16], color: u16) {
+  output[0] = color;
 }
 
 fn fetch_u16(mem: &[u8], addr: usize) -> u16 {
@@ -130,18 +92,18 @@ pub fn get_tile(
   tile_idx: u32,
   bpp8: bool,
   palette_number: u8,
-) -> alloc::vec::Vec<u8> {
+) -> alloc::vec::Vec<u16> {
   let bytes_per_tile = bytes_per_tile(bpp8);
 
   let tile_data_base_addr = tile_page * TILE_DATA_PAGE_SIZE;
   let tile_addr = tile_data_base_addr + tile_idx * bytes_per_tile;
 
-  let mut output = alloc::vec![0u8; 8 * 8*3];
+  let mut output = alloc::vec![0u16; 8 * 8];
 
   for strip_idx in 0..8 {
     draw_mode0_bg_tile_hstrip(
       gba,
-      &mut output[strip_idx * 8 * 3..],
+      &mut output[strip_idx * 8..],
       false,
       false,
       palette_number,
@@ -160,7 +122,7 @@ pub fn get_mode0_bg_tile(
   bg_num: u32,
   tile_x: u32,
   tile_y: u32,
-) -> (alloc::vec::Vec<u8>, u32, u32, u32, u16) {
+) -> (alloc::vec::Vec<u16>, u32, u32, u32, u16) {
   let background_control_flags = bgcnt(gba, bg_num);
   let (
     _priority,
@@ -189,11 +151,11 @@ pub fn get_mode0_bg_tile(
   let (h_flip, v_flip, palette_number, tile_number) = parse_tile_map_element(tile_map_element);
   let tile_addr = tile_data_base_addr + tile_number as u32 * bytes_per_tile;
 
-  let mut output = alloc::vec![0u8; 8 * 8*3];
+  let mut output = alloc::vec![0u16; 8 * 8];
   for strip_idx in 0..8 {
     draw_mode0_bg_tile_hstrip(
       gba,
-      &mut output[strip_idx * 8 * 3..],
+      &mut output[strip_idx * 8..],
       h_flip,
       v_flip,
       palette_number,
@@ -218,7 +180,7 @@ fn parse_tile_map_element(tile_map_element: u32) -> (bool, bool, u8, u16) {
 /// Returns true if any pixels are transparent
 pub fn draw_mode0_bg_tile_hstrip(
   gba: &mut GBA,
-  output: &mut [u8],
+  output: &mut [u16],
   h_flip: bool,
   v_flip: bool,
   palette_number: u8,
@@ -243,7 +205,7 @@ pub fn draw_mode0_bg_tile_hstrip(
       let palette_idx = gba.vram[tile_addr as usize + lookup_idx] as usize;
 
       let color = fetch_u16(&gba.palette_ram[..], palette_idx * 2);
-      write_color(&mut output[((i & 0x7) * 3) as usize..], color);
+      write_color(&mut output[(i & 0x7) as usize..], color);
     }
   } else {
     // 4 bits per pixel
@@ -276,7 +238,7 @@ pub fn draw_mode0_bg_tile_hstrip(
       let transparent_px1 = palette_idx1 == 0;
       let palette_idx1 = if !transparent_px1 { palette_base + (palette_idx1 * 2) } else { 0 };
       let color = fetch_u16(&gba.palette_ram[..], palette_idx1);
-      write_color(&mut output[px_x_within_tile * 3 as usize..], color);
+      write_color(&mut output[px_x_within_tile as usize..], color);
 
       let px2_x_within_tile =
         if h_flip { px_x_within_tile - 1 } else { px_x_within_tile.saturating_add(1) };
@@ -284,7 +246,7 @@ pub fn draw_mode0_bg_tile_hstrip(
       let transparent_px2 = palette_idx2 == 0;
       let palette_idx2 = if !transparent_px2 { palette_base + (palette_idx2 * 2) } else { 0 };
       let color = fetch_u16(&gba.palette_ram[..], palette_idx2);
-      write_color(&mut output[px2_x_within_tile * 3 as usize..], color);
+      write_color(&mut output[px2_x_within_tile as usize..], color);
     }
   }
 }
@@ -369,7 +331,8 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
 
     let not_hidden = obj_mode != 0b10;
     let (y_min, y_max) = (y as u32, y as u32 + (size_y - 1) as u32);
-    let in_scanline = scanline >= y_min && scanline <= y_max;
+    let in_scanline =
+      if y_max <= 255 { scanline >= y_min && scanline <= y_max } else { scanline <= (y_max % 255) };
     if not_hidden && in_scanline {
       let (_, priority, _) = parse_sprite_attr2(sprite_data.2);
       let elem = &mut priority_array[priority_array_fill_size];
@@ -388,7 +351,6 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
                               first_bg: bool,
                               mut scanline_first_px_idx: usize| {
     let transparent_color = fetch_u16(&gba.palette_ram[..], 0);
-    let transparent_color = color_to_rgb(transparent_color);
 
     let (_priority, tile_data_base_addr, tile_map_base_addrs, full_palette, (scroll_x, scroll_y)) =
       bg_data;
@@ -405,7 +367,7 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
     let mut raw_bg_tile_x = raw_bg_x / 8;
 
     let needs_extra_strip = adjust_first_stripe_by_xscroll;
-    let mut output_pxs = [0u8; 8 * 3];
+    let mut output_pxs = [0u16; 8];
     let mut first_strip = true;
     const EXTRA_STRIP_IDX: usize = VIDEO_WIDTH / 8;
     for strip_idx in 0..((VIDEO_WIDTH / 8) + if needs_extra_strip { 1 } else { 0 }) {
@@ -434,33 +396,30 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
 
       let (out_slice, painted_slice) = if first_strip && adjust_first_stripe_by_xscroll {
         let out_texture_slice =
-          &mut gba.output_texture[scanline_first_px_idx..][..(8 - scroll_x_within_tile) * 3];
-        let painted_slice = &output_pxs[scroll_x_within_tile * 3..];
+          &mut gba.output_texture[scanline_first_px_idx..][..(8 - scroll_x_within_tile)];
+        let painted_slice = &output_pxs[scroll_x_within_tile..];
 
-        scanline_first_px_idx -= scroll_x_within_tile * 3;
+        scanline_first_px_idx -= scroll_x_within_tile;
 
         (out_texture_slice, painted_slice)
       } else if strip_idx == EXTRA_STRIP_IDX {
         let out_texture_slice = &mut gba.output_texture
-          [scanline_first_px_idx + EXTRA_STRIP_IDX * 8 * 3..][..scroll_x_within_tile * 3];
-        let painted_slice = &output_pxs[..scroll_x_within_tile * 3];
+          [scanline_first_px_idx + EXTRA_STRIP_IDX * 8..][..scroll_x_within_tile];
+        let painted_slice = &output_pxs[..scroll_x_within_tile];
 
         (out_texture_slice, painted_slice)
       } else {
         let out_texture_slice =
-          &mut gba.output_texture[scanline_first_px_idx + strip_idx * 8 * 3..][..8 * 3];
+          &mut gba.output_texture[scanline_first_px_idx + strip_idx * 8..][..8];
         (out_texture_slice, &output_pxs[..])
       };
       if first_bg {
         out_slice.copy_from_slice(painted_slice);
       } else {
         assert!(out_slice.len() == painted_slice.len());
-        for (out, in_) in out_slice.chunks_exact_mut(3).zip(painted_slice.chunks_exact(3)) {
-          if out[0] == transparent_color.0
-            && out[1] == transparent_color.1
-            && out[2] == transparent_color.2
-          {
-            out.copy_from_slice(in_);
+        for (out, in_) in out_slice.iter_mut().zip(painted_slice.iter()) {
+          if *out == transparent_color {
+            *out = *in_;
           }
         }
       }
@@ -472,12 +431,9 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
   };
 
   let transparent_color = fetch_u16(&gba.palette_ram[..], 0);
-  let transparent_color = color_to_rgb(transparent_color);
-  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
-  for x in gba.output_texture[scanline_first_px_idx..][..VIDEO_WIDTH * 3].chunks_exact_mut(3) {
-    x[2] = transparent_color.2;
-    x[1] = transparent_color.1;
-    x[0] = transparent_color.0;
+  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32)) as usize;
+  for x in gba.output_texture[scanline_first_px_idx..][..VIDEO_WIDTH].iter_mut() {
+    *x = transparent_color;
   }
   let first_bg = false;
   for draw_layer in &priority_array[..priority_array_fill_size] {
@@ -505,8 +461,8 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
       let stride_1d = display_control & 0x40 != 0;
       let char_stride_y_tiles = if stride_1d { tile_count_x } else { 32 } * bytes_per_bpp4_tile;
 
-      let mut output_pxs = [0u8; 8 * 3];
-      let y_within_sprite = scanline - y as u32;
+      let mut output_pxs = [0u16; 8];
+      let y_within_sprite = scanline - if y > VIDEO_HEIGHT as u8 { 0 } else { y as u32 };
       let sprite_tile_y = y_within_sprite / 8;
       let sprite_tile_y =
         if v_flip { (size_y as u32 / 8) - 1 - sprite_tile_y } else { sprite_tile_y };
@@ -530,17 +486,32 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
         );
         let x_offset = x as usize + tile_x as usize * 8;
         if x_offset + 8 < VIDEO_WIDTH {
-          let out_slice = &mut gba.output_texture[scanline_first_px_idx + x_offset * 3..][..8 * 3];
-          for (out, in_) in out_slice.chunks_exact_mut(3).zip(output_pxs.chunks_exact(3)) {
-            if out[0] == transparent_color.0
-              && out[1] == transparent_color.1
-              && out[2] == transparent_color.2
-            {
-              out.copy_from_slice(in_);
+          let out_slice = &mut gba.output_texture[scanline_first_px_idx + x_offset..][..8];
+          for (out, in_) in out_slice.iter_mut().zip(output_pxs.iter()) {
+            if *out == transparent_color {
+              *out = *in_;
             }
           }
-        } else {
+        } else if (x_offset % 512) < VIDEO_WIDTH {
+          let x_offset = x_offset % 512;
           // TODO: Partial last tile
+          let pixels_to_draw = VIDEO_WIDTH - x_offset;
+          let out_slice =
+            &mut gba.output_texture[scanline_first_px_idx + x_offset..][..pixels_to_draw];
+          for (out, in_) in out_slice.iter_mut().zip(output_pxs.iter()) {
+            if *out == transparent_color {
+              *out = *in_;
+            }
+          }
+        } else if (x_offset + 8) % 512 < VIDEO_WIDTH {
+          let last_x_offset = (x_offset + 8) % 512;
+          let out_slice =
+            &mut gba.output_texture[scanline_first_px_idx..][..last_x_offset as usize];
+          for (out, in_) in out_slice.iter_mut().rev().zip(output_pxs.iter().rev()) {
+            if *out == transparent_color {
+              *out = *in_;
+            }
+          }
         }
         //gba.output_texture[scanline_first_px_idx..][..8 * 3].copy_from_slice(&output_pxs);
       }
@@ -591,7 +562,7 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
     }
   }
 
-  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32) * 3) as usize;
+  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32)) as usize;
   let mut first_bg = true;
   for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
     draw_scanline_for_bg(gba, bg_data, first_bg, scanline_first_px_idx);
@@ -615,12 +586,12 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
     3 => {
       // 16 bit color bitmap. One frame buffer (240x160 pixels, 32768 colors)
       let start_idx = (start_px * 2) as usize;
-      let start_idx_out = (start_px * 3) as usize;
+      let start_idx_out = (start_px) as usize;
       #[allow(clippy::match_ref_pats)]
       for (idx, slice) in gba.vram[start_idx..].chunks_exact(2).take(VIDEO_WIDTH).enumerate() {
         if let &[low_byte, high_byte] = slice {
           let color = (u16::from(low_byte)) + (u16::from(high_byte) << 8);
-          write_color(&mut gba.output_texture[(start_idx_out + idx * 3)..], color);
+          write_color(&mut gba.output_texture[(start_idx_out + idx)..], color);
         }
       }
     }
@@ -629,12 +600,12 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       let second_frame = (gba.io_mem[0] & 0x0000_0008) != 0;
       let start_idx =
         (start_px * 1) as usize + if second_frame { VIDEO_WIDTH * VIDEO_HEIGHT } else { 0 };
-      let start_idx_out = (start_px * 3) as usize;
+      let start_idx_out = (start_px) as usize;
 
       for (idx, palette_idx) in gba.vram[start_idx..].iter().take(VIDEO_WIDTH).enumerate() {
         let palette_idx = (*palette_idx as usize) * 2;
         let color = fetch_u16_palette_ram(gba, palette_idx);
-        write_color(&mut gba.output_texture[(start_idx_out + idx * 3)..], color);
+        write_color(&mut gba.output_texture[(start_idx_out + idx)..], color);
       }
     }
     5 => {
@@ -648,20 +619,20 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       let second_frame = (gba.io_mem[0] & 0x0000_0008) != 0; // TODO: Is this right?
       let start_idx =
         (start_px * 2) as usize + if second_frame { BGMODE5_FRAMEBUFFER_PX_COUNT * 2 } else { 0 };
-      let mut start_idx_out = (start_px * 3) as usize;
+      let mut start_idx_out = (start_px) as usize;
 
       if scanline < (BGMODE5_FIRST_Y_PX as u32)
         || scanline < ((BGMODE5_FIRST_Y_PX + BGMODE5_HEIGHT) as u32)
       {
         for x in 0..VIDEO_WIDTH {
           // TODO: Is this right?
-          write_color(&mut gba.output_texture[(x * 3)..], u16::max_value());
+          write_color(&mut gba.output_texture[(x)..], u16::max_value());
         }
       } else {
         for _x in 0..BGMODE5_FIRST_Y_PX {
           // TODO: Is this right?
           write_color(&mut gba.output_texture[start_idx_out..], u16::max_value());
-          start_idx_out += 3;
+          start_idx_out += 1;
         }
         let iter = gba.vram[start_idx..].chunks_exact(2).take(BGMODE5_WIDTH);
         for slice in iter {
@@ -669,13 +640,13 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
             // TODO: Is this right?
             let color = u16::from(low_byte) + (u16::from(high_byte) << 8);
             write_color(&mut gba.output_texture[start_idx_out..], color);
-            start_idx_out += 3;
+            start_idx_out += 1;
           }
         }
         for _x in BGMODE5_WIDTH..(BGMODE5_WIDTH + BGMODE5_FIRST_Y_PX) {
           // TODO: Is this right?
           write_color(&mut gba.output_texture[start_idx_out..], u16::max_value());
-          start_idx_out += 3;
+          start_idx_out += 1;
         }
       }
     }
@@ -736,7 +707,7 @@ fn sprite_size(size: u8, shape: u8) -> (u8, u8) {
 pub fn draw_sprite(
   gba: &mut GBA,
   sprite_idx: u8,
-) -> (alloc::vec::Vec<u8>, u32, u32, u32, u32, u32, u32, u32, u8, u8, u8) {
+) -> (alloc::vec::Vec<u16>, u32, u32, u32, u32, u32, u32, u32, u8, u8, u8) {
   let (attr0, attr1, attr2) = fetch_sprite(gba, sprite_idx);
 
   let (y, obj_mode, gfx_mode, mosaic, bpp8, shape) = parse_sprite_attr0(attr0);
@@ -754,7 +725,7 @@ pub fn draw_sprite(
 
   let tile_idx_in_page = tile_idx as u32 & (0x4000 - 1);
   let tile_page = TILE_DATA_PAGE_SP0 + if tile_idx & 0x4000 != 0 { 1 } else { 0 };
-  let mut out_bytes = alloc::vec![0u8; size_x  as usize * size_y as usize * 3];
+  let mut out_bytes = alloc::vec![0u16; size_x  as usize * size_y as usize ];
   for tile_x in 0..(size_x / 8) {
     for tile_y in 0..(size_y / 8) {
       let char_stride_y_tiles = if stride_1d { tile_count_x } else { 32 };
@@ -765,13 +736,13 @@ pub fn draw_sprite(
         bpp8,
         (palette_idx + 0x10) as u8,
       );
-      let stride_y = size_x * 3;
-      let stride_x = 8 * 3;
+      let stride_y = size_x;
+      let stride_x = 8;
       let start_idx = tile_x * stride_x + tile_y * stride_y * 8;
       let start_idx = start_idx as usize;
       for y_within_tile in 0..8 {
-        out_bytes[start_idx + y_within_tile * stride_y as usize..][..8 * 3]
-          .copy_from_slice(&tile_rgb[y_within_tile * 8 * 3..][..8 * 3]);
+        out_bytes[start_idx + y_within_tile * stride_y as usize..][..8]
+          .copy_from_slice(&tile_rgb[y_within_tile * 8..][..8]);
       }
     }
   }
@@ -788,111 +759,5 @@ pub fn draw_sprite(
     size,
     shape,
     priority,
-  )
-}
-
-// Less accurate but faster version of color_correct_simple
-#[inline]
-unsafe fn color_correct_simple_funsafe(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-  use std::intrinsics::*;
-  let f1 = |x: u8| {
-    //let lcd_gamma = 4.0;
-
-    let x = fdiv_fast(x as f32, 31.0);
-    fmul_fast(fmul_fast(fmul_fast(x, x), x), x)
-    //x.powf(lcd_gamma)
-  };
-
-  let (r, g, b) = (f1(r), f1(g), f1(b));
-
-  pub fn rsqrt(x: f32) -> f32 {
-    unsafe { std::intrinsics::fdiv_fast(1.0, x.sqrt()) }
-  }
-
-  let f2 = |r: f32, g: f32, b: f32, rc: f32, gc: f32, bc: f32| {
-    //let out_gamma = 2.2;
-    //let out_gamma_c = 1.0 / out_gamma;
-    let x =
-      fdiv_fast(fadd_fast(fadd_fast(fmul_fast(r, rc), fmul_fast(g, gc)), fmul_fast(b, bc)), 255.0);
-    //let x = x.powf(out_gamma_c);
-    let x = x.sqrt();
-    //let x_16 = rsqrt(rsqrt(rsqrt(x)));
-    //let x = x * x_16 / rsqrt(rsqrt(x_16));
-    let k = fdiv_fast(fmul_fast(255.0, 255.0), 280.0);
-    fmul_fast(x, k) //.clamp(0.0, 255.0)
-  };
-  let (r, g, b) =
-    (f2(r, g, b, 240.0, 50.0, 0.0), f2(r, g, b, 10.0, 230.0, 10.0), f2(r, g, b, 10.0, 30.0, 220.0));
-
-  (r as u8, g as u8, b as u8)
-}
-#[inline]
-fn color_correct_simple(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-  let lcd_gamma = 4.0;
-  let out_gamma = 2.2;
-  let (r, g, b) = (r as f32 / 31.0, g as f32 / 31.0, b as f32 / 31.0);
-  let (r, g, b) = (r.powf(lcd_gamma), g.powf(lcd_gamma), b.powf(lcd_gamma));
-  let (r, g, b) = (
-    (((r * 240.0 + 50.0 * g + b * 0.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
-      .clamp(0.0, 255.0),
-    (((r * 10.0 + 230.0 * g + b * 10.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
-      .clamp(0.0, 255.0),
-    (((r * 10.0 + 30.0 * g + b * 220.0) / 255.0).powf(1.0 / out_gamma) * (255.0 * 255.0 / 280.0))
-      .clamp(0.0, 255.0),
-  );
-  (r as u8, g as u8, b as u8)
-}
-// source: https://github.com/nba-emu/NanoBoyAdvance/blob/master/src/platform/core/src/device/shader/color_agb.glsl.hpp
-fn color_correct(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
-  let darken_screen = 1.0;
-  let target_gamma = 2.2;
-  let display_gamma = 2.2;
-  let sat = 1.0;
-  let lum = 0.94;
-  let contrast = 1.0;
-  //let blr = 0.0;
-  //let blg = 0.0;
-  //let blb = 0.0;
-  let r_ = 0.82;
-  let g_ = 0.665;
-  let b_ = 0.73;
-  let rg = 0.125;
-  let rb = 0.195;
-  let gr = 0.24;
-  let gb = 0.075;
-  let br = -0.06;
-  let bg = 0.21;
-  //let overscan_percent_x = 0.0;
-  //let overscan_percent_y = 0.0;
-
-  let (r, g, b) = (r as f64 / 31.0, g as f64 / 31.0, b as f64 / 31.0);
-
-  let p = target_gamma + darken_screen;
-  let (r, g, b) = (r.powf(p), g.powf(p), b.powf(p));
-
-  fn lerp(a: f64, b: f64, c: f64) -> f64 {
-    (1.0 - b) * a + b * c
-  }
-  let (r, g, b) =
-    (lerp(r, 0.5, 1.0 - contrast), lerp(g, 0.5, 1.0 - contrast), lerp(b, 0.5, 1.0 - contrast));
-
-  let (r, g, b) = ((r * lum).clamp(0.0, 1.0), (g * lum).clamp(0.0, 1.0), (b * lum).clamp(0.0, 1.0));
-
-  let adjust_a = (1.0 - sat) * 0.3086;
-  let adjust_b = (1.0 - sat) * 0.6094;
-  let adjust_c = (1.0 - sat) * 0.0820;
-  let (r, g, b) = (
-    r * (adjust_a + sat) * r_ + r * adjust_b * rg + r * adjust_c * rb,
-    g * adjust_a * gr + g * (adjust_b + sat) * g_ + g * adjust_c * gb,
-    b * adjust_a * br + b * adjust_b * bg + b * (adjust_c + sat) * b_,
-  );
-
-  let (r, g, b) =
-    (r.powf(1.0 / display_gamma), g.powf(1.0 / display_gamma), b.powf(1.0 / display_gamma));
-
-  (
-    (r * 255.0).clamp(0.0, 255.0) as u8,
-    (g * 255.0).clamp(0.0, 255.0) as u8,
-    (b * 255.0).clamp(0.0, 255.0) as u8,
   )
 }

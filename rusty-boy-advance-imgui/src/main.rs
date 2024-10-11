@@ -17,6 +17,14 @@ use std::{borrow::Cow, collections::VecDeque, io::Read};
 use rusty_boy_advance::disasm::{disasm_arm, disasm_thumb};
 mod support;
 
+#[inline]
+fn to_rgb(rgb15: &[u16]) -> Vec<u8> {
+  use rusty_boy_advance::color_correct::*;
+  rgb15.iter().map(|rgb15| {
+    let rgb = color_to_rgb_simple_fast_funsafe(*rgb15);
+    [rgb.0, rgb.1, rgb.2]
+  }).flatten().collect()
+}
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum BrowsableMemory {
   BIOS,
@@ -216,7 +224,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
   let mut log_control_flow = false;
   let mut gba = GBABox::new(log_level, None, Some(push_log));
   let mut system = support::init("Rusty Boy Advance ImGui");
-  let video_output_texture_id = imgui_glium_texture(&mut system, WIDTH, HEIGHT, gba.video_output().into());
+  let video_output_texture_id = imgui_glium_texture(&mut system, WIDTH, HEIGHT, to_rgb(gba.video_output()));
   
   let sprite_texture_ids: [_; 128] = std::array::from_fn(|_i| imgui_glium_texture(&mut system, 64, 64, vec![0u8; 64*64*3]));
   let mut sprite_metadata: [_; 128] = std::array::from_fn(|_i| {(0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u8, 0u8, 0u8)});
@@ -404,7 +412,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .build(|| {
       let texture = renderer.textures().get(video_output_texture_id).unwrap();
       let raw = RawImage2d {
-        data: Cow::Owned(gba.video_output().into()),
+        data: Cow::Owned(to_rgb(gba.video_output())),
         width: WIDTH as u32,
         height: HEIGHT as u32,
         format: ClientFormat::U8U8U8,
@@ -916,7 +924,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let texture = renderer.textures().get(tile_tex_id).unwrap();
                 let (tile_bytes, map_addr, char_addr, map_val, char_idx) = rusty_boy_advance::draw::get_mode0_bg_tile(&mut gba, bg_viewer_bg_idx, tile_x as u32, tile_y as u32);
                 let raw = RawImage2d {
-                  data: Cow::Owned(tile_bytes.into()),
+                  data: Cow::Owned(to_rgb(&tile_bytes)),
                   width: 8 ,
                   height: 8,
                   format: ClientFormat::U8U8U8,
@@ -996,7 +1004,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let tile_idx = tile_x + tile_y * 16;
                 let tile_bytes = rusty_boy_advance::draw::get_tile(&mut gba, tile_viewer_tile_page, tile_idx as u32, tile_viewer_bpp8, tile_viewer_palette);
                 let raw = RawImage2d {
-                  data: Cow::Owned(tile_bytes.into()),
+                  data: Cow::Owned(to_rgb(&tile_bytes)),
                   width: 8 ,
                   height: 8,
                   format: ClientFormat::U8U8U8,
@@ -1031,7 +1039,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let texture = renderer.textures().get(sprite_tex_id).unwrap();
                 let (sprite_rgb_bytes,x_pos, y_pos, size_x, size_y, tile_idx, tile_addr, palette_idx, size, shape, priority) = rusty_boy_advance::draw::draw_sprite(&mut gba, sprite_idx as u8);
                 let raw = RawImage2d {
-                  data: Cow::Owned(sprite_rgb_bytes.into()),
+                  data: Cow::Owned(to_rgb(&sprite_rgb_bytes)),
                   width: size_x,
                   height: size_y,
                   format: ClientFormat::U8U8U8,
