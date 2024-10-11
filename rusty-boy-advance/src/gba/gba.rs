@@ -420,7 +420,7 @@ impl GBA {
       // General Internal Memory
       // BIOS - System ROM (16 KBytes) E3A02004
       0x00 => {
-        self.bios_rom[(addr & 0x0000_3FFF) as usize] = byte;
+        //self.bios_rom[(addr & 0x0000_3FFF) as usize] = byte;
       }
       // WRAM - On-board Work RAM  (256 KBytes) 2 Wait
       0x02 => {
