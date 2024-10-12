@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use core::intrinsics::breakpoint;
-
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use super::{cpsr, cpu_mode, instructions, rom};
@@ -839,7 +837,6 @@ impl GBA {
         |source, size| *source += size
       }
       _ => std::panic!("Impossible"),
-      _ => std::panic!("Unimplemented: Incremet/Reload Dest DMA"),
     };
     let timing = (control_flags >> 12) & 0x3;
 

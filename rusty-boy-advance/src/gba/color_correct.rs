@@ -27,11 +27,6 @@ pub fn color_to_rgb_simple_fast(color: u16) -> (u8, u8, u8) {
   color_correct_simple_fast(r, g, b)
 }
 #[inline]
-pub fn color_to_rgb_simple_fast_funsafe(color: u16) -> (u8, u8, u8) {
-  let (r, g, b) = color_to_rgb(color);
-  unsafe { color_correct_simple_funsafe(r, g, b) }
-}
-#[inline]
 pub fn color_to_rgb_correct(color: u16) -> (u8, u8, u8) {
   let (r, g, b) = color_to_rgb(color);
   color_correct(r, g, b)
@@ -108,6 +103,7 @@ fn color_correct(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
   )
 }
 
+/*
 /// Less accurate but faster version of color_correct_simple using unstable intrinsics
 #[inline]
 unsafe fn color_correct_simple_funsafe(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
@@ -139,6 +135,12 @@ unsafe fn color_correct_simple_funsafe(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 
   (r as u8, g as u8, b as u8)
 }
+#[inline]
+pub fn color_to_rgb_simple_fast_funsafe(color: u16) -> (u8, u8, u8) {
+  let (r, g, b) = color_to_rgb(color);
+  unsafe { color_correct_simple_funsafe(r, g, b) }
+}
+*/
 // Less accurate but faster version of color_correct_simple
 #[inline]
 fn color_correct_simple_fast(r: u8, g: u8, b: u8) -> (u8, u8, u8) {

@@ -79,10 +79,12 @@ pub fn run(mut gba: GBABox, frames_to_run: u32) -> Result<(), Box<dyn std::error
             // type after you offset to the start of the target row.
             let row_ptr = ptr.add(y * pitch) as *mut u8;
             let idx = x * 3;
-            row_ptr.add(idx).write(output[y * 240 + idx + 2]);
-            row_ptr.add(idx + 1).write(output[y * 240 + idx + 1]);
+            let (r, g, b) =
+              rusty_boy_advance::color_correct::color_to_rgb_simple_fast(output[y * 240 + x]);
+            row_ptr.add(idx).write(b);
+            row_ptr.add(idx + 1).write(g);
             #[allow(clippy::identity_op)]
-            row_ptr.add(idx + 2).write(output[y * 240 + idx + 0]);
+            row_ptr.add(idx + 2).write(r);
           }
         }
       })?;

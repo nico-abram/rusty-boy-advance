@@ -1,14 +1,13 @@
 #![feature(iter_intersperse)]
 
 
-use copypasta::ClipboardProvider;
 use glium::{
-  backend::Facade, texture::{ClientFormat, RawImage2d}, uniforms::{MagnifySamplerFilter, MinifySamplerFilter, Sampler, SamplerBehavior}, Texture2d
+  backend::Facade, texture::{ClientFormat, RawImage2d}, uniforms::{MagnifySamplerFilter, MinifySamplerFilter,  SamplerBehavior}, Texture2d
 };
-use imgui::{sys::igDockBuilderAddNode, Condition, ImString, InputTextFlags, SelectableFlags, StyleVar, TextureId};
-use imgui_winit_support::winit::{dpi::Size, event::ElementState};
+use imgui::{ImString, InputTextFlags, SelectableFlags, StyleVar, TextureId};
+use imgui_winit_support::winit::event::ElementState;
 use rusty_boy_advance::{
-  CLOCKS_PER_FRAME, CLOCKS_PER_PIXEL, CLOCKS_PER_SCANLINE, GBABox, GBAButton, GBAError, LogLevel,
+  CLOCKS_PER_PIXEL, CLOCKS_PER_SCANLINE, GBABox, GBAButton, GBAError, LogLevel,
 };
 
 use std::{borrow::Cow, collections::VecDeque, io::Read};
@@ -20,7 +19,7 @@ mod support;
 fn to_rgb(rgb15: &[u16]) -> Vec<u8> {
   use rusty_boy_advance::color_correct::*;
   rgb15.iter().map(|rgb15| {
-    let rgb = color_to_rgb_simple_fast_funsafe(*rgb15);
+    let rgb = color_to_rgb_simple_fast(*rgb15);
     [rgb.0, rgb.1, rgb.2]
   }).flatten().collect()
 }
@@ -134,9 +133,15 @@ impl<T> RacyUnsafeCell<T> {
 }
 const LOGS_SIZE: usize = 250_000;
 static mut GBA_LOGS: Option<RacyUnsafeCell<VecDeque<String>>> = None;
+fn get_logs<'a>() -> &'a VecDeque<String> {
+  unsafe { & *GBA_LOGS.as_ref().unwrap().get() }
+}
+fn get_logs_mut<'a>() -> &'a mut VecDeque<String> {
+   unsafe { &mut *GBA_LOGS.as_mut().unwrap().get() }
+}
 
 fn push_log(s: &str) {
-  let logs = unsafe { &mut *GBA_LOGS.as_ref().unwrap().get() };
+  let logs = get_logs_mut();
   logs.push_front(String::from(s));
   logs.truncate(LOGS_SIZE);
 }
@@ -149,7 +154,6 @@ fn post_exec(
   scroll_to_addr: &mut bool,
   scroll_to_addr_target: &mut u32,
   running: &mut bool,
-  browsed_memory: &mut BrowsedMemory,
 ) {
   if result.is_err() {
     let err_string = format!(
@@ -160,7 +164,7 @@ fn post_exec(
     );
     push_log(&err_string);
     *running = false;
-    for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().take(50000).rev() {
+    for log_line in get_logs().iter().take(50000).rev() {
       println!("{}", log_line);
     }
   }
@@ -178,7 +182,6 @@ fn run_n_times(
   scroll_to_addr: &mut bool,
   scroll_to_addr_target: &mut u32,
   running: &mut bool,
-  browsed_memory: &mut BrowsedMemory,
 ) {
   let mut result = Ok(false);
   for _ in 0..n {
@@ -194,7 +197,6 @@ fn run_n_times(
     scroll_to_addr,
     scroll_to_addr_target,
     running,
-    browsed_memory,
   );
 }
 
@@ -270,8 +272,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if ! dockspace_initialized {
       dockspace_initialized=true;
     unsafe {
-      let root_node = imgui::sys::igDockBuilderGetNode(dockspace_id);
-
       imgui::sys::igDockBuilderRemoveNode(dockspace_id);
       let dock_id_main = imgui::sys::igDockBuilderAddNode(dockspace_id, imgui::sys::ImGuiDockNodeFlags_DockSpace);
       imgui::sys::igDockBuilderSetNodeSize(dock_id_main, (*imgui::sys::igGetMainViewport()).Size);
@@ -324,14 +324,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 &mut scroll_to_addr,
                 &mut scroll_to_addr_target,
                 &mut running,
-                &mut browsed_memory,
               );
               gba.update_video_output();
             },
             PhysicalKey::Code(KeyCode::F5)if *state == ElementState::Pressed => {
               running = !running;
               just_clicked_continue = running;
-              if (!running) {
+              if !running {
                 scroll_to_addr = true;
                 scroll_to_addr_target = gba.pc();
               }},
@@ -357,7 +356,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           &mut scroll_to_addr,
           &mut scroll_to_addr_target,
           &mut running,
-          &mut browsed_memory,
         );
       } else {
         let mut result = Ok(false);
@@ -387,7 +385,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
           &mut scroll_to_addr,
           &mut scroll_to_addr_target,
           &mut running,
-          &mut browsed_memory,
         );
       }
       just_clicked_continue = false;
@@ -488,7 +485,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.button_with_size(stop_continue_icon, icon_size) {
           running = !running;
           just_clicked_continue = running;
-          if (!running) {
+          if !running {
             scroll_to_addr = true;
             scroll_to_addr_target = gba.pc();
           }
@@ -504,7 +501,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -518,7 +514,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -532,7 +527,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -546,7 +540,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -560,7 +553,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -574,7 +566,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -588,7 +579,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
               &mut scroll_to_addr,
               &mut scroll_to_addr_target,
               &mut running,
-              &mut browsed_memory,
             );
             gba.update_video_output();
           }
@@ -623,7 +613,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         ui.checkbox("Scroll on brk", &mut scroll_to_pc_on_break);
         if ui.small_button("Clear Logs") {
-          unsafe { &mut *GBA_LOGS.as_mut().unwrap().get() }.clear();
+          get_logs_mut().clear();
         }
         if ui.small_button("Go to addr ") {
           scroll_to_addr = true;
@@ -847,13 +837,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
       //.size([1915.0, 360.0], Condition::Appearing)
       .always_vertical_scrollbar(true)
       .build(|| {
-        /*
-        for log_line in unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().rev() {
-          ui.text(log_line);
-        }
-        */
-        for (idx, log_line) in
-          unsafe { &*GBA_LOGS.as_ref().unwrap().get() }.iter().rev().enumerate()
+        for (idx, log_line) in get_logs().iter().rev().enumerate()
         {
           let id = ui.push_id_int(idx as i32 + 1);
           //ui.input_text("log", log_line).read_only(true);
@@ -867,7 +851,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if ui.button("Copy all") {
               ui.close_current_popup();
 
-              let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
+              let logs = get_logs();
               let logstring = logs
                 .iter()
                 .rev()
@@ -879,7 +863,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             if ui.button("Copy all mesen-style") {
               ui.close_current_popup();
               
-              let logs = unsafe { &*GBA_LOGS.as_ref().unwrap().get() };
+              let logs = get_logs();
               let logstring = logs
                 .iter()
                 .rev()

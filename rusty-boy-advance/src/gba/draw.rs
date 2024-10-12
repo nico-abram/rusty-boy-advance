@@ -1,4 +1,4 @@
-use super::gba::{DISPCNT_ADDR, GBA, VIDEO_HEIGHT, VIDEO_WIDTH};
+use super::gba::{GBA, VIDEO_HEIGHT, VIDEO_WIDTH};
 
 const TILE_WIDTH: u32 = 8;
 const TILE_HEIGHT: u32 = 8;
@@ -307,7 +307,7 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
       (self.layer & 0x7F) as usize
     }
   }
-  let mut priority_array: [_; { 128 + 4 }] =
+  let mut priority_array: [_; 128 + 4] =
     core::array::from_fn(|_| PriorityDrawLayer { implicit_priority: 0, priority: 0, layer: 0 });
   let mut priority_array_fill_size = 0;
   for (idx, bg_data) in bg_data_arr.iter().enumerate() {
@@ -543,31 +543,6 @@ fn draw_scanline_bgmode0(gba: &mut GBA, scanline: u32, display_control: u16) {
       */
     }
   }
-  return;
-
-  // 4 is a sentinel value indicating no bg
-  let mut bgs_to_draw = [4, 4, 4, 4, 4, 4];
-  for (idx, bg_data) in bg_data_arr.iter().enumerate() {
-    if display_control & (1 << (8 + idx)) != 0 {
-      let priority = bg_data.0 as usize;
-      if bgs_to_draw[priority] == 4 {
-        bgs_to_draw[priority] = idx;
-      } else if bgs_to_draw[priority as usize + 1] == 4 {
-        bgs_to_draw[priority + 1] = idx;
-      } else if bgs_to_draw[priority as usize + 2] == 4 {
-        bgs_to_draw[priority + 2] = idx;
-      } else {
-        unimplemented!("matching BG priority is unimplemented")
-      }
-    }
-  }
-
-  let scanline_first_px_idx = (scanline * (VIDEO_WIDTH as u32)) as usize;
-  let mut first_bg = true;
-  for bg_data in bgs_to_draw.iter().filter(|bg| **bg != 4).map(|bg| &bg_data_arr[*bg]) {
-    draw_scanline_for_bg(gba, bg_data, first_bg, scanline_first_px_idx);
-    first_bg = false;
-  }
 }
 
 pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
@@ -613,7 +588,6 @@ pub fn draw_scanline(gba: &mut GBA, scanline: u32) {
       const BGMODE5_WIDTH: usize = 160;
       const BGMODE5_HEIGHT: usize = 128;
       const BGMODE5_FRAMEBUFFER_PX_COUNT: usize = BGMODE5_WIDTH * BGMODE5_HEIGHT;
-      const BGMODE5_FIRST_X_PX: usize = (VIDEO_WIDTH - BGMODE5_WIDTH) / 2;
       const BGMODE5_FIRST_Y_PX: usize = (VIDEO_HEIGHT - BGMODE5_HEIGHT) / 2;
 
       let second_frame = (gba.io_mem[0] & 0x0000_0008) != 0; // TODO: Is this right?
