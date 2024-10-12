@@ -39,9 +39,53 @@ pub fn init(title: &str) -> System {
   let event_loop = EventLoop::new().expect("Failed to create EventLoop");
   let builder: WindowBuilder =
     WindowBuilder::new().with_maximized(true).with_title(title.to_owned());
+
+  /*
   let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
     .set_window_builder(builder)
-    .build(&event_loop);
+  .build(&event_loop);
+  */
+  let (window, display) = {
+    use glutin::{display::GetGlDisplay, prelude::*};
+    use raw_window_handle::HasRawWindowHandle;
+
+    // First we start by opening a new Window
+    let display_builder = glutin_winit::DisplayBuilder::new().with_window_builder(Some(builder));
+    let config_template_builder = glutin::config::ConfigTemplateBuilder::new();
+    let (window, gl_config) = display_builder
+      .build(&event_loop, config_template_builder, |mut configs| {
+        // Just use the first configuration since we don't have any special preferences here
+        configs.next().unwrap()
+      })
+      .unwrap();
+    let window = window.unwrap();
+
+    // Now we get the window size to use as the initial size of the Surface
+    let (width, height): (u32, u32) = window.inner_size().into();
+    let attrs = glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
+      .build(
+        window.raw_window_handle(),
+        std::num::NonZeroU32::new(width).unwrap(),
+        std::num::NonZeroU32::new(height).unwrap(),
+      );
+
+    // Finally we can create a Surface, use it to make a PossiblyCurrentContext and create the glium Display
+    let surface = unsafe { gl_config.display().create_window_surface(&gl_config, &attrs).unwrap() };
+    let context_attributes =
+      glutin::context::ContextAttributesBuilder::new().build(Some(window.raw_window_handle()));
+    let current_context = Some(unsafe {
+      gl_config
+        .display()
+        .create_context(&gl_config, &context_attributes)
+        .expect("failed to create context")
+    })
+    .unwrap()
+    .make_current(&surface)
+    .unwrap();
+    surface.set_swap_interval(&current_context, glutin::surface::SwapInterval::DontWait).unwrap();
+    let display = Display::from_context_surface(current_context, surface).unwrap();
+    (window, display)
+  };
 
   let mut imgui = Context::create();
   imgui.set_ini_filename(None);

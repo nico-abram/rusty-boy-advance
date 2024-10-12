@@ -1,7 +1,6 @@
 #![feature(iter_intersperse)]
 
 
-use capstone::prelude::*;
 use copypasta::ClipboardProvider;
 use glium::{
   backend::Facade, texture::{ClientFormat, RawImage2d}, uniforms::{MagnifySamplerFilter, MinifySamplerFilter, Sampler, SamplerBehavior}, Texture2d
@@ -612,11 +611,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if ui.radio_button("Debug", &mut log_level, LogLevel::Debug) {
           gba.set_log_level(log_level);
         }
-        /*
-        if ui.radio_button("CFlow", &mut log_level, LogLevel::ControlFlow) {
-          gba.set_log_level(log_level);
-        }
-        */
         ui.separator();
         if ui.checkbox("CFlow", &mut log_control_flow) {
           gba.enable_control_flow_logs(log_control_flow);
